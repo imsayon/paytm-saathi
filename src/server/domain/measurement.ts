@@ -110,7 +110,7 @@ export async function buildReport(db: Db, campaignId: string, versionId: string)
     caveats: [
       "Synthetic, fixed-seed simulation on demo data. Descriptive comparison only, not proven causal impact.",
       "Contribution proxy is payment volume after reward. Merchant margin, messaging cost and support cost are unavailable, so this is not profit.",
-      "The demo scripts returns only for delivered campaign messages. Real customers can return without receiving an offer; this is not an attribution model.",
+      "The simulator scripts returns only for delivered campaign messages. Real customers can return without receiving an offer; this is not an attribution model.",
       "Group sizes are small, so the difference is illustrative rather than statistically powered.",
     ],
   };

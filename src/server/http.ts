@@ -34,6 +34,9 @@ export async function handle(request: Request, handler: Handler): Promise<NextRe
       code: appError.code,
       status: appError.status,
       duration_ms: Date.now() - startedAt,
+      // The client only ever sees the generic message; the real cause stays in
+      // the server log, keyed by request id.
+      ...(error instanceof AppError ? {} : { cause: describeUnexpectedError(error) }),
     });
 
     return NextResponse.json(errorBody(appError, requestId), {
@@ -41,6 +44,12 @@ export async function handle(request: Request, handler: Handler): Promise<NextRe
       headers: { "x-request-id": requestId },
     });
   }
+}
+
+/** Name and message only, with anything that looks like a connection string removed. */
+function describeUnexpectedError(error: unknown): string {
+  const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return text.replace(/[a-z]+:\/\/[^\s]*@[^\s]*/gi, "<connection string>").slice(0, 300);
 }
 
 export async function readJson<T>(request: Request, schema: z.ZodType<T>): Promise<T> {

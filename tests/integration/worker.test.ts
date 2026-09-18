@@ -261,3 +261,40 @@ test("pending delivery cannot freeze an incomplete outcome report", async () => 
   await assert.rejects(runOutcomeSimulation(db,ctx,campaignId),/Finish mock delivery/);
   assert.equal(await count(db,`SELECT COUNT(*)::int AS n FROM outcome`),0);
 });
+
+test("a worker that died after recording its status check is recovered without a duplicate-attempt error", async () => {
+  const { db } = await approvedCampaign();
+  const target = await db.one<{ id: string }>(`SELECT id FROM delivery_job ORDER BY seq LIMIT 1`);
+  const now = new Date().toISOString();
+  // Attempt 1 timed out; the reclaimed worker recorded status check #2 and then crashed before sending.
+  await db.run(`UPDATE delivery_job SET status = 'UNKNOWN', attempt_count = 1, lease_owner = NULL, lease_expires_at = NULL WHERE id = $1`, [target!.id]);
+  await db.run(
+    `INSERT INTO delivery_attempt (id, job_id, attempt_no, outcome, provider_message_id, provider_response, started_at, finished_at)
+     VALUES ('att_t1', $1, 1, 'timeout', NULL, '{}', $2, $2), ('att_t2', $1, 2, 'status_check_not_delivered', NULL, '{}', $2, $2)`,
+    [target!.id, now],
+  );
+
+  let sends = 0;
+  const provider: DeliveryProvider = {
+    name: "recovering",
+    async send(): Promise<SendResult> {
+      sends += 1;
+      return { outcome: "delivered", providerMessageId: "after-crash", raw: "{}" };
+    },
+    async getStatus(): Promise<StatusResult> {
+      return { state: "not_delivered", raw: "{}" };
+    },
+  };
+  const summary = await drainQueue(db, { maxJobs: 1, provider });
+
+  assert.equal(summary.delivered, 1);
+  assert.equal(sends, 1, "status proved nothing was delivered, so exactly one send follows");
+  const attempts = await db.all<{ attempt_no: number; outcome: string }>(
+    `SELECT attempt_no, outcome FROM delivery_attempt WHERE job_id = $1 ORDER BY attempt_no`,
+    [target!.id],
+  );
+  assert.deepEqual(
+    attempts.map((row) => [row.attempt_no, row.outcome]),
+    [[1, "timeout"], [2, "status_check_not_delivered"], [3, "delivered"]],
+  );
+});

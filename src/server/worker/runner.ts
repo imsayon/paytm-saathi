@@ -1,4 +1,3 @@
-import { recordAudit } from "../audit/events";
 import { closeDb, getDb, newId, type Db } from "../db/client";
 import { log } from "../observability/log";
 import { mockProvider } from "../providers/mock";
@@ -19,7 +18,7 @@ type JobRow = {
   provider_key: string;
   attempt_count: number;
   scenario_slot: number;
-};
+} & SendContext;
 
 export type DrainSummary = {
   processed: number;
@@ -30,10 +29,22 @@ export type DrainSummary = {
   cancelled: number;
 };
 
+type SendContext = {
+  current_version: number | null;
+  version: number | null;
+  approval_id: string | null;
+  consent_state: string | null;
+  contact_ref: string | null;
+  proposal: Proposal | null;
+};
+
 /**
  * Atomic claim: the row lock with SKIP LOCKED means a second worker cannot take
  * a job whose lease is still live, and an expired lease becomes claimable again
- * after a crash. One statement, one round trip, committed before any provider call.
+ * after a crash. The same statement reads everything the pre-send check and the
+ * send need (current version, active approval, latest consent, contact
+ * reference, copy), so the check runs on data as fresh as the claim itself and
+ * a job costs one round trip before the provider is asked anything.
  */
 async function claimJob(db: Db, workerId: string): Promise<JobRow | null> {
   const now = Date.now();
@@ -51,64 +62,44 @@ async function claimJob(db: Db, workerId: string): Promise<JobRow | null> {
      UPDATE delivery_job j
         SET status = 'PROCESSING', lease_owner = $1, lease_expires_at = $2, updated_at = $3
        FROM candidate WHERE j.id = candidate.id
-      RETURNING j.id, j.merchant_id, j.campaign_id, j.version_id, j.recipient_id, j.customer_id, candidate.status, j.provider_key, j.attempt_count, j.scenario_slot`,
+      RETURNING j.id, j.merchant_id, j.campaign_id, j.version_id, j.recipient_id, j.customer_id, candidate.status,
+                j.provider_key, j.attempt_count, j.scenario_slot,
+                (SELECT c.current_version FROM campaign c WHERE c.id = j.campaign_id) AS current_version,
+                (SELECT v.version FROM campaign_version v WHERE v.id = j.version_id) AS version,
+                (SELECT v.proposal FROM campaign_version v WHERE v.id = j.version_id) AS proposal,
+                (SELECT cu.contact_ref FROM customer cu WHERE cu.id = j.customer_id) AS contact_ref,
+                (SELECT a.id FROM campaign_approval a WHERE a.version_id = j.version_id AND a.status = 'active' LIMIT 1) AS approval_id,
+                (SELECT cs.state FROM consent cs
+                  WHERE cs.merchant_id = j.merchant_id AND cs.customer_id = j.customer_id
+                  ORDER BY cs.observed_at DESC, cs.seq DESC LIMIT 1) AS consent_state`,
     [workerId, leaseExpiry, nowIso, MAX_ATTEMPTS, nowIso],
   );
   return claimed ?? null;
 }
 
+/** Job update and audit event in one statement, so neither can land without the other. */
 async function cancelJob(db: Db, job: JobRow, reason: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.run(
-      `UPDATE delivery_job SET status = 'CANCELLED', cancel_reason = $1, lease_owner = NULL, lease_expires_at = NULL, updated_at = $2 WHERE id = $3`,
-      [reason, new Date().toISOString(), job.id],
-    );
-    await recordAudit(tx, {
-      merchantId: job.merchant_id,
-      campaignId: job.campaign_id,
-      versionId: job.version_id,
-      jobId: job.id,
-      actor: "worker",
-      action: "delivery.cancelled",
-      entity: `delivery_job:${job.id}`,
-      newState: "CANCELLED",
-      details: { reason, provider_called: false },
-    });
-  });
-}
-
-type SendContext = {
-  current_version: number | null;
-  version: number | null;
-  approval_id: string | null;
-  consent_state: string | null;
-  contact_ref: string | null;
-  proposal: Proposal | null;
-};
-
-/**
- * One read for everything the pre-send check and the send itself need. Consent
- * and version are re-checked here, immediately before any provider call.
- */
-async function loadSendContext(db: Db, job: JobRow): Promise<SendContext> {
-  const row = await db.one<SendContext>(
-    `SELECT c.current_version,
-            v.version,
-            v.proposal,
-            cu.contact_ref,
-            (SELECT a.id FROM campaign_approval a WHERE a.version_id = j.version_id AND a.status = 'active' LIMIT 1) AS approval_id,
-            (SELECT cs.state FROM consent cs
-              WHERE cs.merchant_id = j.merchant_id AND cs.customer_id = j.customer_id
-              ORDER BY cs.observed_at DESC, cs.seq DESC LIMIT 1) AS consent_state
-       FROM delivery_job j
-       LEFT JOIN campaign c ON c.id = j.campaign_id
-       LEFT JOIN campaign_version v ON v.id = j.version_id
-       LEFT JOIN customer cu ON cu.id = j.customer_id
-      WHERE j.id = $1`,
-    [job.id],
-  );
-  return (
-    row ?? { current_version: null, version: null, approval_id: null, consent_state: null, contact_ref: null, proposal: null }
+  const now = new Date().toISOString();
+  await db.run(
+    `WITH job AS (
+       UPDATE delivery_job
+          SET status = 'CANCELLED', cancel_reason = $1, lease_owner = NULL, lease_expires_at = NULL, updated_at = $2
+        WHERE id = $3
+     )
+     INSERT INTO audit_event
+       (id, merchant_id, campaign_id, version_id, job_id, actor, action, entity, old_state, new_state, request_id, details, created_at)
+     VALUES ($4, $5, $6, $7, $3, 'worker', 'delivery.cancelled', $8, NULL, 'CANCELLED', NULL, $9::jsonb, $2)`,
+    [
+      reason,
+      now,
+      job.id,
+      newId("aud"),
+      job.merchant_id,
+      job.campaign_id,
+      job.version_id,
+      `delivery_job:${job.id}`,
+      JSON.stringify({ reason, provider_called: false }),
+    ],
   );
 }
 
@@ -123,7 +114,10 @@ function preSendBlocker(context: SendContext): string | null {
   return null;
 }
 
-/** Attempt, job status and audit event land together, so a crash between them cannot leave a half-recorded result. */
+/**
+ * Attempt, job status and audit event land in one statement, so a crash between
+ * them cannot leave a half-recorded result, and a settle costs one round trip.
+ */
 async function settle(
   db: Db,
   job: JobRow,
@@ -137,33 +131,43 @@ async function settle(
     audit: { action: string; oldState?: string; details: Record<string, unknown> };
   },
 ): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.run(
-      `INSERT INTO delivery_attempt (id, job_id, attempt_no, outcome, provider_message_id, provider_response, started_at, finished_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [newId("att"), job.id, input.attemptNo, input.outcome, input.providerMessageId, input.raw, input.startedAt, new Date().toISOString()],
-    );
-    await tx.run(
-      `UPDATE delivery_job SET status = $1, attempt_count = $2, lease_owner = NULL, lease_expires_at = NULL, updated_at = $3 WHERE id = $4`,
-      [input.status, input.attemptNo, new Date().toISOString(), job.id],
-    );
-    await recordAudit(tx, {
-      merchantId: job.merchant_id,
-      campaignId: job.campaign_id,
-      versionId: job.version_id,
-      jobId: job.id,
-      actor: "worker",
-      action: input.audit.action,
-      entity: `delivery_job:${job.id}`,
-      oldState: input.audit.oldState ?? null,
-      newState: input.status,
-      details: input.audit.details,
-    });
-  });
+  const now = new Date().toISOString();
+  await db.run(
+    `WITH attempt AS (
+       INSERT INTO delivery_attempt (id, job_id, attempt_no, outcome, provider_message_id, provider_response, started_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ), job AS (
+       UPDATE delivery_job
+          SET status = $9, attempt_count = $3, lease_owner = NULL, lease_expires_at = NULL, updated_at = $8
+        WHERE id = $2
+     )
+     INSERT INTO audit_event
+       (id, merchant_id, campaign_id, version_id, job_id, actor, action, entity, old_state, new_state, request_id, details, created_at)
+     VALUES ($10, $11, $12, $13, $2, 'worker', $14, $15, $16, $9, NULL, $17::jsonb, $8)`,
+    [
+      newId("att"),
+      job.id,
+      input.attemptNo,
+      input.outcome,
+      input.providerMessageId,
+      input.raw,
+      input.startedAt,
+      now,
+      input.status,
+      newId("aud"),
+      job.merchant_id,
+      job.campaign_id,
+      job.version_id,
+      input.audit.action,
+      `delivery_job:${job.id}`,
+      input.audit.oldState ?? null,
+      JSON.stringify(input.audit.details),
+    ],
+  );
 }
 
 async function processJob(db: Db, job: JobRow, provider: DeliveryProvider): Promise<string> {
-  const context = await loadSendContext(db, job);
+  const context: SendContext = job;
   const blocker = preSendBlocker(context);
   if (blocker) {
     await cancelJob(db, job, blocker);
@@ -217,9 +221,12 @@ async function processJob(db: Db, job: JobRow, provider: DeliveryProvider): Prom
     }
 
     // Status proves nothing was delivered: record the check, then re-send below.
+    // A worker that died between this insert and the send leaves the row
+    // behind; the reclaiming worker must not trip over it.
     await db.run(
       `INSERT INTO delivery_attempt (id, job_id, attempt_no, outcome, provider_message_id, provider_response, started_at, finished_at)
-       VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)`,
+       VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)
+       ON CONFLICT (job_id, attempt_no) DO NOTHING`,
       [newId("att"), job.id, attemptNo, `status_check_${status.state}`, status.raw, startedAt, new Date().toISOString()],
     );
   }
@@ -288,50 +295,63 @@ async function processJob(db: Db, job: JobRow, provider: DeliveryProvider): Prom
 }
 
 export async function refreshCampaignDeliveryStatus(db: Db, campaignId: string): Promise<void> {
-  const counts = await db.all<{ status: string; n: number }>(
-    `SELECT status, COUNT(*)::int AS n FROM delivery_job WHERE campaign_id = $1 AND status != 'CANCELLED' GROUP BY status`,
-    [campaignId],
-  );
-
-  const by = (status: string) => counts.find((row) => row.status === status)?.n ?? 0;
-  const pending = by("QUEUED") + by("PROCESSING") + by("UNKNOWN");
-  const delivered = by("DELIVERED");
-  const failed = by("FAILED");
-  const needsReview = by("NEEDS_REVIEW");
-  const total = counts.reduce((sum, row) => sum + row.n, 0);
-
-  const campaign = await db.one<{ status: string; merchant_id: string }>(
-    `SELECT status, merchant_id FROM campaign WHERE id = $1`,
+  const campaign = await db.one<{
+    status: string;
+    merchant_id: string;
+    pending: number;
+    delivered: number;
+    failed: number;
+    needs_review: number;
+    total: number;
+  }>(
+    `SELECT c.status, c.merchant_id,
+            COUNT(j.id) FILTER (WHERE j.status IN ('QUEUED', 'PROCESSING', 'UNKNOWN'))::int AS pending,
+            COUNT(j.id) FILTER (WHERE j.status = 'DELIVERED')::int AS delivered,
+            COUNT(j.id) FILTER (WHERE j.status = 'FAILED')::int AS failed,
+            COUNT(j.id) FILTER (WHERE j.status = 'NEEDS_REVIEW')::int AS needs_review,
+            COUNT(j.id)::int AS total
+       FROM campaign c
+       LEFT JOIN delivery_job j ON j.campaign_id = c.id AND j.status != 'CANCELLED'
+      WHERE c.id = $1
+      GROUP BY c.id`,
     [campaignId],
   );
   if (!campaign || ["OUTCOME_WINDOW", "REPORTED"].includes(campaign.status)) return;
-  if (total === 0) return;
+  if (campaign.total === 0) return;
 
   let next = campaign.status;
-  if (pending > 0) next = "SENDING";
-  else if (needsReview > 0) next = "NEEDS_REVIEW";
-  else if (delivered === 0) next = "FAILED";
-  else if (failed > 0) next = "PARTIALLY_DELIVERED";
+  if (campaign.pending > 0) next = "SENDING";
+  else if (campaign.needs_review > 0) next = "NEEDS_REVIEW";
+  else if (campaign.delivered === 0) next = "FAILED";
+  else if (campaign.failed > 0) next = "PARTIALLY_DELIVERED";
   else next = "SENDING";
 
   if (next !== campaign.status) {
-    await db.transaction(async (tx) => {
-      await tx.run(`UPDATE campaign SET status = $1, updated_at = $2 WHERE id = $3`, [
+    const now = new Date().toISOString();
+    // Status change and its audit event in one statement.
+    await db.run(
+      `WITH changed AS (
+         UPDATE campaign SET status = $1, updated_at = $2 WHERE id = $3
+       )
+       INSERT INTO audit_event
+         (id, merchant_id, campaign_id, version_id, job_id, actor, action, entity, old_state, new_state, request_id, details, created_at)
+       VALUES ($4, $5, $3, NULL, NULL, 'worker', 'campaign.delivery_status_changed', $6, $7, $1, NULL, $8::jsonb, $2)`,
+      [
         next,
-        new Date().toISOString(),
+        now,
         campaignId,
-      ]);
-      await recordAudit(tx, {
-        merchantId: campaign.merchant_id,
-        campaignId,
-        actor: "worker",
-        action: "campaign.delivery_status_changed",
-        entity: `campaign:${campaignId}`,
-        oldState: campaign.status,
-        newState: next,
-        details: { delivered, failed, needs_review: needsReview, pending },
-      });
-    });
+        newId("aud"),
+        campaign.merchant_id,
+        `campaign:${campaignId}`,
+        campaign.status,
+        JSON.stringify({
+          delivered: campaign.delivered,
+          failed: campaign.failed,
+          needs_review: campaign.needs_review,
+          pending: campaign.pending,
+        }),
+      ],
+    );
   }
 }
 

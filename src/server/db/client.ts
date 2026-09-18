@@ -1,5 +1,6 @@
 import pg, { type Pool, type PoolClient, type QueryResult, type QueryResultRow } from "pg";
 import { config } from "../config";
+import { log } from "../observability/log";
 
 // Column types come back as the shapes the domain code works with: dates as
 // YYYY-MM-DD strings, timestamps as ISO strings, counts as numbers. JSONB is
@@ -35,7 +36,7 @@ export class Db {
   ) {}
 
   query<R extends QueryResultRow = QueryResultRow>(text: string, values: unknown[] = []): Promise<QueryResult<R>> {
-    if (!this.inTransaction) return this.source.query<R>(text, values);
+    if (!this.inTransaction) return retryOnConnectTimeout(() => this.source.query<R>(text, values));
     const result = this.queue.then(() => this.source.query<R>(text, values));
     this.queue = result.catch(() => undefined);
     return result;
@@ -61,7 +62,7 @@ export class Db {
    */
   async transaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
     if (this.inTransaction) return fn(this);
-    const client = await (this.source as Pool).connect();
+    const client = await retryOnConnectTimeout(() => (this.source as Pool).connect());
     const tx = new Db(client, true);
     try {
       await client.query("BEGIN");
@@ -117,15 +118,47 @@ export type PoolOptions = {
   /** Postgres schema to put first on the search path. Direct connections only. */
   schema?: string;
   max?: number;
+  /** Clients the pool keeps open instead of closing them when idle. */
+  min?: number;
 };
+
+const CONNECT_PHASE_ERROR = /timeout exceeded when trying to connect|Connection terminated due to connection timeout/i;
+
+/** True only for failures raised before any statement reached the server. */
+export function isConnectPhaseError(error: unknown): boolean {
+  return error instanceof Error && CONNECT_PHASE_ERROR.test(error.message);
+}
+
+/**
+ * Re-runs `attempt` when establishing a connection timed out. Nothing has been
+ * sent to the server at that point, so retrying cannot double-execute a
+ * statement; any other error is rethrown untouched.
+ */
+export async function retryOnConnectTimeout<T>(attempt: () => Promise<T>, retries = 2): Promise<T> {
+  for (let tried = 0; ; tried += 1) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (tried >= retries || !isConnectPhaseError(error)) throw error;
+      log("warn", "db.connect_retry", { attempt: tried + 1 });
+      await new Promise((resolve) => setTimeout(resolve, 250 * (tried + 1)));
+    }
+  }
+}
 
 export function createPool(connectionString: string, options: PoolOptions = {}): Pool {
   const local = connectionString.includes("localhost") || connectionString.includes("127.0.0.1");
   const pool = new pg.Pool({
     connectionString,
     max: options.max ?? 8,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 30_000,
+    min: options.min ?? 0,
+    // A drained pool that reopens eight TLS connections at once has stalled
+    // on flaky Wi-Fi; a long idle timeout keeps warm clients around between
+    // demo steps, and a short connect timeout lets the retry above kick in.
+    idleTimeoutMillis: 120_000,
+    connectionTimeoutMillis: 10_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
     // Neon requires TLS with certificate verification; a URL without sslmode
     // must not silently connect in plaintext.
     ssl: local ? undefined : { rejectUnauthorized: true },
@@ -144,24 +177,39 @@ export function quoteIdent(name: string): string {
   return `"${name}"`;
 }
 
-type Cache = { pool: Pool; db: Db; url: string } | null;
+type Cache = { pool: Pool; db: Db; url: string; heartbeat: NodeJS.Timeout } | null;
 const globalCache = globalThis as unknown as { __saathiDb?: Cache };
+
+const HEARTBEAT_MS = 25_000;
 
 /** Application handle on the pooled Neon connection. Cached across hot reloads. */
 export function getDb(): Db {
   const url = config.databaseUrl;
   const cached = globalCache.__saathiDb;
   if (cached && cached.url === url) return cached.db;
-  const pool = createPool(url);
+  const pool = createPool(url, { min: 2 });
   const db = new Db(pool);
-  globalCache.__saathiDb = { pool, db, url };
+  // While the app runs, a cheap query every 25 s keeps two clients warm and
+  // stops Neon's scale-to-zero, so the first click after a pause on stage does
+  // not wait for a compute wake-up plus a burst of new TLS handshakes.
+  // `unref` lets scripts exit without an explicit closeDb().
+  const heartbeat = setInterval(() => {
+    pool.query("SELECT 1").catch(() => {
+      // The next real query reconnects and reports the problem itself.
+    });
+  }, HEARTBEAT_MS);
+  heartbeat.unref();
+  globalCache.__saathiDb = { pool, db, url, heartbeat };
   return db;
 }
 
 export async function closeDb(): Promise<void> {
   const cached = globalCache.__saathiDb;
   globalCache.__saathiDb = null;
-  if (cached) await cached.pool.end();
+  if (cached) {
+    clearInterval(cached.heartbeat);
+    await cached.pool.end();
+  }
 }
 
 export function newId(prefix: string): string {
