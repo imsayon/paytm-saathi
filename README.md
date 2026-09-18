@@ -17,39 +17,47 @@ The boundary that matters: **no provider call exists until merchant approval suc
 
 ## Quick start
 
+The application stores everything in a Neon Postgres database. You need two connection strings from the Neon console: the **pooled** endpoint for the app and the **direct** endpoint for migrations.
+
 ```bash
 npm install
-npm run db:seed
+cp .env.example .env      # paste DATABASE_URL (pooled) and DATABASE_URL_UNPOOLED (direct)
+npm run db:migrate        # applies db/migrations/*.sql over the direct connection
+npm run db:seed           # seeds the demo merchant, imports the fixture, prints the signal
 npm run dev
 ```
 
-Open http://localhost:3000 and follow the five numbered steps in the header.
+Open http://localhost:3000 and follow the five numbered steps in the header. `GET /api/healthz` confirms the database is reachable; `GET /api/readyz` confirms every migration is applied.
 
-`npm run db:seed` creates the SQLite schema, seeds the demo merchant, imports the frozen fixture and prints the resulting signal. It is safe to re-run: the import is checksum-idempotent.
+`npm run db:seed` is safe to re-run: the import is checksum-idempotent. The import screen also has a **Reset demo data** control that clears the demo merchant's campaigns, jobs and outcomes so the sequence can be rehearsed again on the same database.
 
 Optional, for the model-backed planner:
 
 ```bash
-cp .env.example .env
-# set OPENAI_API_KEY=sk-...
+# in .env
+OPENAI_API_KEY=sk-...
 ```
 
-Without a key the planner uses a deterministic template and labels every proposal `template fallback`, in the UI and in the audit trail. The demo runs end to end with no key, no network and no account.
+Without a key the planner uses a deterministic template and labels every proposal `template fallback`, in the UI and in the audit trail. The demo runs end to end with no model key.
 
 ### Commands
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | Next.js app and API on port 3000 |
-| `npm run db:migrate` | Create/verify the SQLite schema |
+| `npm run db:migrate` | Apply pending migrations from `db/migrations/` (direct connection) |
 | `npm run db:seed` | Seed merchant, import the fixture, print the signal |
 | `npm run worker` | Run the delivery worker as its own process |
-| `npm test` | Unit and integration tests (Node's test runner) |
-| `npm run test:e2e` | Playwright smoke test of the whole demo path |
+| `npm test` | Unit and integration tests against a real Postgres (see below) |
+| `npm run test:e2e` | Playwright smoke test of the whole demo path on a production build |
 | `npm run typecheck` | TypeScript, no emit |
 | `npx tsx scripts/generate-fixture.ts` | Regenerate the committed fixture CSV |
 
 The UI has demo controls for delivery and the outcome clock, so a presenter never needs a second terminal. `npm run worker` exists to show the same jobs being drained by a real background process.
+
+### Tests need a test database
+
+Set `TEST_DATABASE_URL` in `.env` to the Neon `test` branch (direct endpoint) or a local Postgres such as `postgresql://localhost:5432/saathi_test`. Unit and integration tests create an isolated schema per test and drop it afterwards; the e2e run resets the demo merchant's data on that database. The e2e suite refuses to start without `TEST_DATABASE_URL`, so it can never wipe the production branch by accident. A local Postgres runs the whole suite in a few seconds; the Neon branch takes about two minutes because every query crosses the network.
 
 ## Who owns what
 
@@ -65,14 +73,15 @@ What the planner receives is aggregate only: cohort counts, the inactivity windo
 
 ## Architecture
 
-One TypeScript application. One SQLite database. One optional worker process.
+One TypeScript application. One Neon Postgres database. One optional worker process.
 
 ```
+db/migrations/           Schema as numbered SQL files, applied by scripts/migrate.ts
 src/app/                 Next.js routes: 5 merchant screens + the API
 src/server/
-  config.ts              Environment configuration
+  config.ts              Environment configuration (pooled URL for the app, direct URL for migrations)
   auth/context.ts        Development-only merchant session (refuses outside demo mode)
-  db/                    SQLite client (WAL), schema, write transactions
+  db/                    pg client, transaction helper, migration runner
   importer/              CSV parsing, validation, atomic checksum-idempotent import
   domain/
     signal.ts            Regular / absent / consent cohort rules
@@ -89,14 +98,14 @@ data/fixtures/           The frozen synthetic CSV
 tests/                   Unit, integration, and the Playwright demo path
 ```
 
-SQLite with WAL and `BEGIN IMMEDIATE` around approval is deliberate: one host, one writer, recoverable, and no infrastructure that exists only to look distributed. Move to Postgres and a managed queue when concurrent merchants, high availability or multi-host workers become real requirements — not before.
+Postgres does three jobs here and nothing more. Approval takes a row lock on the campaign (`SELECT ... FOR UPDATE`) so two concurrent approvals cannot both queue jobs. The delivery queue is a table: a worker claims with `UPDATE ... FOR UPDATE SKIP LOCKED ... RETURNING`, so any number of workers can drain it without a broker. Migrations are plain SQL files recorded in a `schema_migration` table with checksums, applied over the direct connection while the app uses the pooled one. There is no Redis, no Kafka and no queue service.
 
 ## Reliability
 
 - **Import** is idempotent on `(merchant_id, checksum)` and validates the entire file before publishing any row.
 - **Approval** requires an `Idempotency-Key`. The same key replays the original approval; a different key against an approved version is a `409`; a stale version is a `409`.
 - **Jobs** are unique per `(version_id, recipient_id)` and carry a stable provider idempotency key.
-- **The worker** claims jobs with a conditional update and a lease. A second worker cannot take a live lease; an expired lease is reclaimed after a crash.
+- **The worker** claims jobs with an atomic locked update and a lease. Two workers draining at once never process the same job; an expired lease is reclaimed after a crash. An attempt, its job status and its audit event commit in one transaction.
 - **Consent and version are re-checked immediately before every provider call.** A revoked consent cancels the job without contacting the provider.
 - **A timeout never triggers a blind retry.** The worker asks the provider for status using the same idempotency key and re-sends only when status proves nothing was delivered. An unresolvable status becomes `NEEDS_REVIEW` and stops.
 - **Outcome simulation** is idempotent on `(campaign_id, customer_id, window_start)`.
@@ -116,7 +125,7 @@ Three things it deliberately does not claim:
 
 Tenant-scoped reads and writes with cross-merchant authorization tests; a development-only merchant session that refuses to resolve outside demo mode; upload size and row limits; strict parsing of money, dates and states; neutralised spreadsheet formula content; masked identifiers in the UI and logs; redacted log fields; rate limits on import and preview; aggregate-only planner input; untrusted merchant intent delimited inside a fixed system instruction; no model tools; environment-based secrets.
 
-The demo endpoints under `/api/campaigns/{id}/demo/` are refused unless `SAATHI_DEMO_MODE=true`.
+The demo endpoints under `/api/demo/` and `/api/campaigns/{id}/demo/` are refused unless `SAATHI_DEMO_MODE=true`. Connection strings live only in `.env` (git-ignored) or deployment secrets; the health endpoint reports the database host, never credentials.
 
 ## API
 
@@ -131,7 +140,9 @@ The demo endpoints under `/api/campaigns/{id}/demo/` are refused unless `SAATHI_
 | `GET /api/campaigns/{id}/outcome` | Delivery and seven-day outcome data |
 | `POST /api/campaigns/{id}/demo/run-delivery` | Demo control: drain the mock queue |
 | `POST /api/campaigns/{id}/demo/run-outcome` | Demo control: advance the fixed clock |
-| `GET /api/healthz` | Database, demo mode, planner, pending jobs |
+| `POST /api/demo/reset` | Demo control: clear the demo merchant's data for another rehearsal |
+| `GET /api/healthz` | Liveness: database reachability, demo mode, planner, pending jobs (503 when the database is down) |
+| `GET /api/readyz` | Readiness: every migration file applied (503 with the pending list otherwise) |
 
 Errors share one shape: `{ "error": { "code", "message", "details", "request_id" } }`.
 
@@ -150,7 +161,7 @@ No live Paytm integration or credentials. No real SMS, WhatsApp, email or custom
 ## Limitations
 
 - Authentication is a seeded demo session. Real merchant auth and tenant isolation must be chosen before any pilot.
-- SQLite is single-writer and single-host by design here.
+- The database is shared by everyone who holds the connection string, and the demo reset clears the demo merchant for all of them. Tests use their own branch or a local server.
 - The outcome window is simulated, not observed.
 - The mock provider's behaviour is deterministic demo scaffolding, including one scripted timeout and one scripted failure so the reliability paths are visible during a demo.
 - Event submission constraints beyond what the HackBriven page publishes are not verifiable from the available source.

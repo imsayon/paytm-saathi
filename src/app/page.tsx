@@ -55,6 +55,22 @@ export default function ImportPage() {
     }
   }
 
+  async function resetDemo() {
+    if (!window.confirm("Clear the demo merchant's imports, campaigns, jobs and outcomes so the demo can start again?")) {
+      return;
+    }
+    setBusy(true);
+    setUploadError(null);
+    try {
+      await apiCall("/api/demo/reset", { method: "POST", body: "{}" });
+      await load();
+    } catch (caught) {
+      setUploadError((caught as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function uploadCsv(file: File) {
     setBusy(true);
     setUploadError(null);
@@ -186,6 +202,20 @@ export default function ImportPage() {
           </p>
         </div>
       )}
+
+      {overview.demo.demo_mode && (overview.last_import || overview.campaigns.length > 0) ? (
+        <div className="card">
+          <div className="actions">
+            <button className="secondary" onClick={resetDemo} disabled={busy}>
+              Reset demo data
+            </button>
+            <span className="tiny muted">
+              Demo control. Clears this merchant&apos;s imports, campaigns, jobs and simulated outcomes from the shared
+              database so the sequence can be rehearsed again. Nothing here is real customer data.
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       {overview.campaigns.length > 0 ? (
         <div className="card">

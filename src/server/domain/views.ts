@@ -62,39 +62,38 @@ export type JobView = {
   attempt_log: { attempt_no: number; outcome: string; provider_message_id: string | null; finished_at: string }[];
 };
 
-export function listJobViews(db: Db, versionId: string): JobView[] {
-  const jobs = db
-    .prepare(
+export async function listJobViews(db: Db, versionId: string): Promise<JobView[]> {
+  const [jobs, attempts] = await Promise.all([
+    db.all<{
+      id: string;
+      status: string;
+      attempt_count: number;
+      provider_key: string;
+      cancel_reason: string | null;
+      external_id: string;
+    }>(
       `SELECT j.id, j.status, j.attempt_count, j.provider_key, j.cancel_reason, c.external_id
          FROM delivery_job j
          JOIN customer c ON c.id = j.customer_id
-        WHERE j.version_id = ?
+        WHERE j.version_id = $1
         ORDER BY j.scenario_slot`,
-    )
-    .all(versionId) as {
-    id: string;
-    status: string;
-    attempt_count: number;
-    provider_key: string;
-    cancel_reason: string | null;
-    external_id: string;
-  }[];
-
-  const attempts = db
-    .prepare(
+      [versionId],
+    ),
+    db.all<{
+      job_id: string;
+      attempt_no: number;
+      outcome: string;
+      provider_message_id: string | null;
+      finished_at: string;
+    }>(
       `SELECT a.job_id, a.attempt_no, a.outcome, a.provider_message_id, a.finished_at
          FROM delivery_attempt a
          JOIN delivery_job j ON j.id = a.job_id
-        WHERE j.version_id = ?
+        WHERE j.version_id = $1
         ORDER BY a.attempt_no`,
-    )
-    .all(versionId) as {
-    job_id: string;
-    attempt_no: number;
-    outcome: string;
-    provider_message_id: string | null;
-    finished_at: string;
-  }[];
+      [versionId],
+    ),
+  ]);
 
   return jobs.map((job) => ({
     job_id: job.id,
@@ -150,29 +149,27 @@ export type CampaignDetail = {
   provider: { name: string; live: boolean };
 };
 
-export function buildCampaignDetail(db: Db, ctx: MerchantContext, campaignId: string): CampaignDetail {
-  const campaign = loadCampaign(db, ctx, campaignId);
-  const version = loadVersion(db, campaign.id, campaign.current_version);
-  const recipients = listRecipients(db, version.id);
-  const signal = computeSignal(db, ctx.merchantId, campaign.as_of);
-  const proposal = JSON.parse(version.proposal_json) as Proposal;
+export async function buildCampaignDetail(db: Db, ctx: MerchantContext, campaignId: string): Promise<CampaignDetail> {
+  const campaign = await loadCampaign(db, ctx, campaignId);
+  const version = await loadVersion(db, campaign.id, campaign.current_version);
+  const proposal: Proposal = version.proposal;
 
-  const externalIdById = new Map(
-    (
-      db.prepare(`SELECT id, external_id FROM customer WHERE merchant_id = ?`).all(ctx.merchantId) as {
-        id: string;
-        external_id: string;
-      }[]
-    ).map((row) => [row.id, row.external_id]),
-  );
+  const [recipients, signal, customers, approval, jobs, report, audit] = await Promise.all([
+    listRecipients(db, version.id),
+    computeSignal(db, ctx.merchantId, campaign.as_of),
+    db.all<{ id: string; external_id: string }>(`SELECT id, external_id FROM customer WHERE merchant_id = $1`, [
+      ctx.merchantId,
+    ]),
+    db.one<{ id: string; version: number; approver: string; created_at: string }>(
+      `SELECT id, version, approver, created_at FROM campaign_approval WHERE campaign_id = $1 AND status = 'active' ORDER BY created_at DESC LIMIT 1`,
+      [campaign.id],
+    ),
+    listJobViews(db, version.id),
+    buildReport(db, campaign.id, version.id),
+    listAudit(db, ctx.merchantId, campaign.id),
+  ]);
+  const externalIdById = new Map(customers.map((row) => [row.id, row.external_id]));
 
-  const approval = db
-    .prepare(
-      `SELECT id, version, approver, created_at FROM campaign_approval WHERE campaign_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1`,
-    )
-    .get(campaign.id) as { id: string; version: number; approver: string; created_at: string } | undefined;
-
-  const jobs = listJobViews(db, version.id);
   const jobSummary = jobs.reduce<Record<string, number>>((summary, job) => {
     summary[job.status] = (summary[job.status] ?? 0) + 1;
     return summary;
@@ -201,7 +198,7 @@ export function buildCampaignDetail(db: Db, ctx: MerchantContext, campaignId: st
     },
     proposal,
     rule_result: validateProposal({ proposal, signal, budgetCapMinor: version.cap_minor }),
-    rule_result_at_creation: JSON.parse(version.rule_result_json) as RuleResult,
+    rule_result_at_creation: version.rule_result,
     approval: approval ?? null,
     groups: {
       campaign: recipients
@@ -214,13 +211,13 @@ export function buildCampaignDetail(db: Db, ctx: MerchantContext, campaignId: st
     jobs,
     job_summary: jobSummary,
     signal: signalView(signal),
-    report: buildReport(db, campaign.id, version.id),
-    audit: listAudit(db, ctx.merchantId, campaign.id).map((event) => ({
+    report,
+    audit: audit.map((event) => ({
       id: event.id,
       action: event.action,
       actor: event.actor,
       entity: event.entity,
-      details: JSON.parse(event.details_json),
+      details: event.details,
       created_at: event.created_at,
     })),
     provider: { name: "mock", live: false },

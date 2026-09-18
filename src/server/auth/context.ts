@@ -19,16 +19,17 @@ export type MerchantContext = {
  * demo seeds one merchant and every request is scoped to it. Refusing to resolve
  * a context outside demo mode is what keeps this from silently becoming prod auth.
  */
-export function requireMerchantContext(db: Db): MerchantContext {
+export async function requireMerchantContext(db: Db): Promise<MerchantContext> {
   if (!config.demoMode) {
     throw new AppError(
       "UNAUTHENTICATED",
       "No merchant session. Real authentication is not implemented; this build only supports the labelled demo session.",
     );
   }
-  const row = db
-    .prepare(`SELECT id, name, timezone FROM merchant WHERE id = ?`)
-    .get(DEMO_MERCHANT_ID) as { id: string; name: string; timezone: string } | undefined;
+  const row = await db.one<{ id: string; name: string; timezone: string }>(
+    `SELECT id, name, timezone FROM merchant WHERE id = $1`,
+    [DEMO_MERCHANT_ID],
+  );
 
   if (!row) {
     throw new AppError("UNAVAILABLE", "Demo merchant is not seeded. Run: npm run db:seed");

@@ -15,26 +15,27 @@ export type AuditInput = {
   details?: Record<string, unknown>;
 };
 
-export function recordAudit(db: Db, input: AuditInput): string {
+export async function recordAudit(db: Db, input: AuditInput): Promise<string> {
   const id = newId("aud");
-  db.prepare(
+  await db.run(
     `INSERT INTO audit_event
-       (id, merchant_id, campaign_id, version_id, job_id, actor, action, entity, old_state, new_state, request_id, details_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    input.merchantId,
-    input.campaignId ?? null,
-    input.versionId ?? null,
-    input.jobId ?? null,
-    input.actor,
-    input.action,
-    input.entity,
-    input.oldState ?? null,
-    input.newState ?? null,
-    input.requestId ?? null,
-    JSON.stringify(input.details ?? {}),
-    new Date().toISOString(),
+       (id, merchant_id, campaign_id, version_id, job_id, actor, action, entity, old_state, new_state, request_id, details, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13)`,
+    [
+      id,
+      input.merchantId,
+      input.campaignId ?? null,
+      input.versionId ?? null,
+      input.jobId ?? null,
+      input.actor,
+      input.action,
+      input.entity,
+      input.oldState ?? null,
+      input.newState ?? null,
+      input.requestId ?? null,
+      JSON.stringify(input.details ?? {}),
+      new Date().toISOString(),
+    ],
   );
   return id;
 }
@@ -46,17 +47,16 @@ export type AuditRow = {
   actor: string;
   old_state: string | null;
   new_state: string | null;
-  details_json: string;
+  details: Record<string, unknown>;
   created_at: string;
 };
 
-export function listAudit(db: Db, merchantId: string, campaignId: string): AuditRow[] {
-  return db
-    .prepare(
-      `SELECT id, action, entity, actor, old_state, new_state, details_json, created_at
-         FROM audit_event
-        WHERE merchant_id = ? AND campaign_id = ?
-        ORDER BY created_at ASC, rowid ASC`,
-    )
-    .all(merchantId, campaignId) as AuditRow[];
+export function listAudit(db: Db, merchantId: string, campaignId: string): Promise<AuditRow[]> {
+  return db.all<AuditRow>(
+    `SELECT id, action, entity, actor, old_state, new_state, details, created_at
+       FROM audit_event
+      WHERE merchant_id = $1 AND campaign_id = $2
+      ORDER BY created_at ASC, seq ASC`,
+    [merchantId, campaignId],
+  );
 }

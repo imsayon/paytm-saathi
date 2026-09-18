@@ -19,20 +19,23 @@ type ImportBody = {
 export async function POST(request: Request) {
   return handle(request, async ({ requestId }) => {
     const db = getDb();
-    seedMerchant(db);
-    const ctx = requireMerchantContext(db);
+    await seedMerchant(db);
+    const ctx = await requireMerchantContext(db);
     rateLimit(`import:${ctx.merchantId}`, 10, 60_000);
 
     const body = await readJson<ImportBody>(request);
     if (!body.use_fixture && !body.csv) {
       throw new AppError("BAD_REQUEST", "Provide either use_fixture: true or a csv string.");
     }
+    if (body.csv !== undefined && typeof body.csv !== "string") {
+      throw new AppError("BAD_REQUEST", "csv must be a string containing the file contents.");
+    }
 
     const content = body.use_fixture ? readFixture() : body.csv!;
     const sourceName = body.use_fixture ? FIXTURE_NAME : (body.source_name ?? "upload.csv");
 
-    const result = importCsv(db, ctx, { content, sourceName, requestId });
-    const signal = computeSignal(db, ctx.merchantId, DEMO_AS_OF);
+    const result = await importCsv(db, ctx, { content, sourceName, requestId });
+    const signal = await computeSignal(db, ctx.merchantId, DEMO_AS_OF);
 
     return NextResponse.json(
       {

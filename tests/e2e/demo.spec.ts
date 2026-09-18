@@ -1,14 +1,12 @@
-import fs from "node:fs";
-import path from "node:path";
 import { expect, test } from "@playwright/test";
 
-test.beforeAll(() => {
-  // Start from an empty database so the run asserts the documented numbers, not
-  // leftovers from a previous run.
-  for (const suffix of ["", "-wal", "-shm"]) {
-    const file = path.join(process.cwd(), "data", `e2e.db${suffix}`);
-    if (fs.existsSync(file)) fs.rmSync(file);
-  }
+test.beforeAll(async ({ request }) => {
+  // Start from an empty demo merchant so the run asserts the documented numbers,
+  // not leftovers from a previous run. The web server points at the test database.
+  const ready = await request.get("/api/readyz");
+  expect(ready.ok(), "migrations must be applied before the smoke test").toBeTruthy();
+  const reset = await request.post("/api/demo/reset", { data: {} });
+  expect(reset.ok()).toBeTruthy();
 });
 
 test("the full demo path runs from import to holdout report", async ({ page }) => {
@@ -81,6 +79,46 @@ test("the full demo path runs from import to holdout report", async ({ page }) =
   await expect(audit).toContainText("campaign.approved");
   await expect(audit).toContainText("jobs.queued");
   await expect(audit).toContainText("report.generated");
+});
+
+test("health and readiness report the Postgres backend", async ({ request }) => {
+  const health = await (await request.get("/api/healthz")).json();
+  expect(health.status).toBe("ok");
+  expect(health.database).toBe("ready");
+  expect(health.database_backend).toBe("postgres");
+  expect(health.live_provider_integrations).toBe(0);
+
+  const ready = await (await request.get("/api/readyz")).json();
+  expect(ready.ready).toBe(true);
+  expect(ready.pending_migrations).toEqual([]);
+});
+
+test("a malformed CSV upload is rejected with the offending row", async ({ request }) => {
+  const csv = [
+    "merchant_id,customer_id,paid_at,amount_minor,status,consent",
+    "mch_demo_bengaluru,C1,2026-07-14T10:30:00+05:30,20000,settled,true",
+    "mch_demo_bengaluru,C2,not-a-date,20000,settled,true",
+  ].join("\n");
+  const response = await request.post("/api/imports", { data: { csv, source_name: "broken.csv" } });
+  expect(response.status()).toBe(400);
+  const body = await response.json();
+  expect(body.error.code).toBe("BAD_REQUEST");
+  expect(body.error.message).toContain("Row 3");
+});
+
+test("approval without an Idempotency-Key is refused and demo controls stay gated", async ({ request }) => {
+  const overview = await (await request.get("/api/overview")).json();
+  const campaignId = overview.campaigns[0]?.id;
+  expect(campaignId).toBeTruthy();
+
+  const missingKey = await request.post(`/api/campaigns/${campaignId}/approve`, { data: { version: 2 } });
+  expect(missingKey.status()).toBe(400);
+
+  const stale = await request.post(`/api/campaigns/${campaignId}/approve`, {
+    data: { version: 1 },
+    headers: { "idempotency-key": "e2e-stale" },
+  });
+  expect(stale.status()).toBe(409);
 });
 
 test("the outcome simulation stays idempotent when re-run", async ({ page }) => {

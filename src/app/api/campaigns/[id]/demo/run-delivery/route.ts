@@ -18,15 +18,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     requireDemoMode();
     const { id } = await params;
     const db = getDb();
-    seedMerchant(db);
-    const ctx = requireMerchantContext(db);
-    loadCampaign(db, ctx, id);
+    await seedMerchant(db);
+    const ctx = await requireMerchantContext(db);
+    await loadCampaign(db, ctx, id);
 
     const summary = await drainQueue(db, { workerId: "demo-control" });
 
     return NextResponse.json({
       worker: { ...summary, provider: "mock", live_messages_sent: 0 },
-      campaign: buildCampaignDetail(db, ctx, id),
+      campaign: await buildCampaignDetail(db, ctx, id),
     });
   });
 }

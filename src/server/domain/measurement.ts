@@ -29,10 +29,10 @@ export type MeasurementReport = {
 
 type OutcomeRow = {
   assignment_group: "campaign" | "holdout";
-  returned: number;
+  returned: boolean;
   settled_amount_minor: number;
   reward_cost_minor: number;
-  opted_out: number;
+  opted_out: boolean;
   window_start: string;
   window_end: string;
 };
@@ -43,7 +43,7 @@ function rate(returns: number, size: number): number {
 
 function groupMetrics(rows: OutcomeRow[], group: "campaign" | "holdout"): GroupMetrics {
   const inGroup = rows.filter((row) => row.assignment_group === group);
-  const returns = inGroup.filter((row) => row.returned === 1).length;
+  const returns = inGroup.filter((row) => row.returned).length;
   return {
     size: inGroup.length,
     returns,
@@ -56,26 +56,24 @@ function groupMetrics(rows: OutcomeRow[], group: "campaign" | "holdout"): GroupM
  * Every figure here is computed from stored assignments and outcome rows. No
  * model output reaches this function.
  */
-export function buildReport(db: Db, campaignId: string, versionId: string): MeasurementReport {
-  const rows = db
-    .prepare(
+export async function buildReport(db: Db, campaignId: string, versionId: string): Promise<MeasurementReport> {
+  const [rows, errorRow] = await Promise.all([
+    db.all<OutcomeRow>(
       `SELECT assignment_group, returned, settled_amount_minor, reward_cost_minor, opted_out, window_start, window_end
-         FROM outcome WHERE campaign_id = ?`,
-    )
-    .all(campaignId) as OutcomeRow[];
-
-  const deliveryErrors = (
-    db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM delivery_job WHERE version_id = ? AND status IN ('FAILED', 'NEEDS_REVIEW')`,
-      )
-      .get(versionId) as { n: number }
-  ).n;
+         FROM outcome WHERE campaign_id = $1 ORDER BY id`,
+      [campaignId],
+    ),
+    db.one<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM delivery_job WHERE version_id = $1 AND status IN ('FAILED', 'NEEDS_REVIEW')`,
+      [versionId],
+    ),
+  ]);
+  const deliveryErrors = errorRow?.n ?? 0;
 
   const campaign = groupMetrics(rows, "campaign");
   const holdout = groupMetrics(rows, "holdout");
 
-  const returners = rows.filter((row) => row.returned === 1);
+  const returners = rows.filter((row) => row.returned);
   const averageReturnAmount =
     returners.length === 0
       ? SIMULATION.returnAmountMinor
@@ -98,7 +96,7 @@ export function buildReport(db: Db, campaignId: string, versionId: string): Meas
     incremental_payment_volume_minor: incrementalVolume,
     reward_cost_minor: rewardCost,
     contribution_proxy_minor: incrementalVolume - rewardCost,
-    opt_outs: rows.filter((row) => row.opted_out === 1).length,
+    opt_outs: rows.filter((row) => row.opted_out).length,
     delivery_errors: deliveryErrors,
     average_return_amount_minor: averageReturnAmount,
     formulas: {

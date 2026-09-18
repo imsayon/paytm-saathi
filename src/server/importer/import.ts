@@ -1,10 +1,10 @@
 import type { MerchantContext } from "../auth/context";
 import { recordAudit } from "../audit/events";
 import { config } from "../config";
-import { inWriteTransaction, newId, type Db } from "../db/client";
+import { newId, type Db } from "../db/client";
 import { localDate } from "../domain/time";
 import { AppError } from "../errors";
-import { parseCsv } from "./csv";
+import { parseCsv, type ParsedRow } from "./csv";
 
 export type ImportResult = {
   batchId: string;
@@ -15,11 +15,11 @@ export type ImportResult = {
   alreadyImported: boolean;
 };
 
-export function importCsv(
+export async function importCsv(
   db: Db,
   ctx: MerchantContext,
   input: { content: string; sourceName: string; requestId?: string },
-): ImportResult {
+): Promise<ImportResult> {
   if (Buffer.byteLength(input.content, "utf8") > config.maxImportBytes) {
     throw new AppError("BAD_REQUEST", `CSV exceeds the ${config.maxImportBytes} byte import limit.`);
   }
@@ -35,16 +35,13 @@ export function importCsv(
     );
   }
 
-  const existing = db
-    .prepare(`SELECT id, row_count, id_strategy FROM import_batch WHERE merchant_id = ? AND checksum = ?`)
-    .get(ctx.merchantId, parsed.checksum) as
-    | { id: string; row_count: number; id_strategy: "file_payment_id" | "derived_id" }
-    | undefined;
+  const existing = await db.one<{ id: string; row_count: number; id_strategy: "file_payment_id" | "derived_id" }>(
+    `SELECT id, row_count, id_strategy FROM import_batch WHERE merchant_id = $1 AND checksum = $2`,
+    [ctx.merchantId, parsed.checksum],
+  );
 
   if (existing) {
-    const customerCount = (
-      db.prepare(`SELECT COUNT(*) AS n FROM customer WHERE merchant_id = ?`).get(ctx.merchantId) as { n: number }
-    ).n;
+    const customerCount = await countCustomers(db, ctx.merchantId);
     return {
       batchId: existing.id,
       checksum: parsed.checksum,
@@ -58,60 +55,77 @@ export function importCsv(
   const batchId = newId("imb");
   const now = new Date().toISOString();
 
-  const customerCount = inWriteTransaction(db, () => {
-    db.prepare(
-      `INSERT INTO import_batch (id, merchant_id, checksum, source_name, row_count, imported_at, status, id_strategy)
-       VALUES (?, ?, ?, ?, ?, ?, 'published', ?)`,
-    ).run(batchId, ctx.merchantId, parsed.checksum, input.sourceName, parsed.rows.length, now, parsed.idStrategy);
+  // The first row for each customer carries the name, contact and consent that
+  // the import records, matching how a row-by-row import would behave.
+  const firstRowByCustomer = new Map<string, ParsedRow>();
+  for (const row of parsed.rows) {
+    if (!firstRowByCustomer.has(row.customerId)) firstRowByCustomer.set(row.customerId, row);
+  }
 
-    const upsertCustomer = db.prepare(
-      `INSERT INTO customer (id, merchant_id, external_id, display_name, contact_ref, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT (merchant_id, external_id)
+  const customerCount = await db.transaction(async (tx) => {
+    // Publishing the batch row first means a duplicate concurrent import of the
+    // same file fails on the checksum index before it writes any payments.
+    await tx.run(
+      `INSERT INTO import_batch (id, merchant_id, checksum, source_name, row_count, imported_at, status, id_strategy)
+       VALUES ($1, $2, $3, $4, $5, $6, 'published', $7)`,
+      [batchId, ctx.merchantId, parsed.checksum, input.sourceName, parsed.rows.length, now, parsed.idStrategy],
+    );
+
+    await tx.insertMany(
+      "customer",
+      ["id", "merchant_id", "external_id", "display_name", "contact_ref", "created_at"],
+      [...firstRowByCustomer.values()].map((row) => [
+        newId("cus"),
+        ctx.merchantId,
+        row.customerId,
+        row.customerName,
+        row.contactRef,
+        now,
+      ]),
+      `ON CONFLICT (merchant_id, external_id)
        DO UPDATE SET display_name = excluded.display_name, contact_ref = excluded.contact_ref`,
     );
-    const findCustomer = db.prepare(`SELECT id FROM customer WHERE merchant_id = ? AND external_id = ?`);
-    const insertConsent = db.prepare(
-      `INSERT INTO consent (id, merchant_id, customer_id, state, source, observed_at) VALUES (?, ?, ?, ?, 'csv_import', ?)`,
+
+    const customerIds = new Map(
+      (
+        await tx.all<{ id: string; external_id: string }>(
+          `SELECT id, external_id FROM customer WHERE merchant_id = $1 AND external_id = ANY($2::text[])`,
+          [ctx.merchantId, [...firstRowByCustomer.keys()]],
+        )
+      ).map((row) => [row.external_id, row.id] as const),
     );
-    const insertPayment = db.prepare(
-      `INSERT INTO payment (id, merchant_id, payment_id, customer_id, paid_at, local_date, amount_minor, status, import_batch_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (merchant_id, payment_id) DO NOTHING`,
+
+    await tx.insertMany(
+      "consent",
+      ["id", "merchant_id", "customer_id", "state", "source", "observed_at"],
+      [...firstRowByCustomer.values()].map((row) => [
+        newId("con"),
+        ctx.merchantId,
+        customerIds.get(row.customerId)!,
+        row.consent,
+        "csv_import",
+        row.paidAt,
+      ]),
     );
 
-    const customerIds = new Map<string, string>();
-
-    for (const row of parsed.rows) {
-      let customerId = customerIds.get(row.customerId);
-      if (!customerId) {
-        upsertCustomer.run(
-          newId("cus"),
-          ctx.merchantId,
-          row.customerId,
-          row.customerName,
-          row.contactRef,
-          now,
-        );
-        customerId = (findCustomer.get(ctx.merchantId, row.customerId) as { id: string }).id;
-        customerIds.set(row.customerId, customerId);
-        insertConsent.run(newId("con"), ctx.merchantId, customerId, row.consent, row.paidAt);
-      }
-
-      insertPayment.run(
+    await tx.insertMany(
+      "payment",
+      ["id", "merchant_id", "payment_id", "customer_id", "paid_at", "local_date", "amount_minor", "status", "import_batch_id"],
+      parsed.rows.map((row) => [
         newId("pay"),
         ctx.merchantId,
         row.paymentId,
-        customerId,
+        customerIds.get(row.customerId)!,
         row.paidAt,
         localDate(row.paidAt, ctx.timezone),
         row.amountMinor,
         row.status,
         batchId,
-      );
-    }
+      ]),
+      `ON CONFLICT (merchant_id, payment_id) DO NOTHING`,
+    );
 
-    recordAudit(db, {
+    await recordAudit(tx, {
       merchantId: ctx.merchantId,
       actor: ctx.actor,
       action: "import.published",
@@ -138,4 +152,9 @@ export function importCsv(
     idStrategy: parsed.idStrategy,
     alreadyImported: false,
   };
+}
+
+async function countCustomers(db: Db, merchantId: string): Promise<number> {
+  const row = await db.one<{ n: number }>(`SELECT COUNT(*)::int AS n FROM customer WHERE merchant_id = $1`, [merchantId]);
+  return row?.n ?? 0;
 }

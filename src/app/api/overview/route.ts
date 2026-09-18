@@ -10,34 +10,25 @@ import { handle } from "@/server/http";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  return handle(request, () => {
+  return handle(request, async () => {
     const db = getDb();
-    seedMerchant(db);
-    const ctx = requireMerchantContext(db);
+    await seedMerchant(db);
+    const ctx = await requireMerchantContext(db);
 
-    const lastImport = db
-      .prepare(
+    const [lastImport, campaigns] = await Promise.all([
+      db.one<{ id: string; source_name: string; row_count: number; imported_at: string; id_strategy: string }>(
         `SELECT id, source_name, row_count, imported_at, id_strategy FROM import_batch
-          WHERE merchant_id = ? ORDER BY imported_at DESC LIMIT 1`,
-      )
-      .get(ctx.merchantId) as
-      | { id: string; source_name: string; row_count: number; imported_at: string; id_strategy: string }
-      | undefined;
-
-    const campaigns = db
-      .prepare(
+          WHERE merchant_id = $1 ORDER BY imported_at DESC LIMIT 1`,
+        [ctx.merchantId],
+      ),
+      db.all<{ id: string; intent: string; status: string; current_version: number; created_at: string }>(
         `SELECT id, intent, status, current_version, created_at FROM campaign
-          WHERE merchant_id = ? ORDER BY created_at DESC LIMIT 10`,
-      )
-      .all(ctx.merchantId) as {
-      id: string;
-      intent: string;
-      status: string;
-      current_version: number;
-      created_at: string;
-    }[];
+          WHERE merchant_id = $1 ORDER BY created_at DESC LIMIT 10`,
+        [ctx.merchantId],
+      ),
+    ]);
 
-    const signal = lastImport ? signalView(computeSignal(db, ctx.merchantId, DEMO_AS_OF)) : null;
+    const signal = lastImport ? signalView(await computeSignal(db, ctx.merchantId, DEMO_AS_OF)) : null;
 
     return NextResponse.json({
       merchant: {

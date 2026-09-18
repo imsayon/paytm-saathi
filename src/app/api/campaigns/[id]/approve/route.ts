@@ -15,8 +15,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   return handle(request, async ({ requestId }) => {
     const { id } = await params;
     const db = getDb();
-    seedMerchant(db);
-    const ctx = requireMerchantContext(db);
+    await seedMerchant(db);
+    const ctx = await requireMerchantContext(db);
 
     const idempotencyKey = request.headers.get("idempotency-key");
     if (!idempotencyKey) {
@@ -28,7 +28,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       throw new AppError("BAD_REQUEST", "version must be the integer version number being approved.");
     }
 
-    const result = approveCampaign(db, ctx, {
+    const result = await approveCampaign(db, ctx, {
       campaignId: id,
       version: body.version!,
       idempotencyKey,
@@ -45,7 +45,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         replayed: result.replayed,
         provider_called: false,
       },
-      campaign: buildCampaignDetail(db, ctx, id),
+      campaign: await buildCampaignDetail(db, ctx, id),
     });
   });
 }

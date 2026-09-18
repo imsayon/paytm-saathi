@@ -25,13 +25,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   return handle(request, async ({ requestId }) => {
     const { id } = await params;
     const db = getDb();
-    seedMerchant(db);
-    const ctx = requireMerchantContext(db);
+    await seedMerchant(db);
+    const ctx = await requireMerchantContext(db);
 
     const body = await readJson<ReviseBody>(request);
-    const campaign = loadCampaign(db, ctx, id);
-    const current = loadVersion(db, campaign.id, campaign.current_version);
-    const base = JSON.parse(current.proposal_json) as Proposal;
+    const campaign = await loadCampaign(db, ctx, id);
+    const current = await loadVersion(db, campaign.id, campaign.current_version);
+    const base: Proposal = current.proposal;
 
     if (body.reward_minor !== undefined && !Number.isInteger(body.reward_minor)) {
       throw new AppError("BAD_REQUEST", "reward_minor must be a whole number of paise.");
@@ -62,13 +62,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       model_estimated_cost_minor: null,
     };
 
-    reviseCampaign(db, ctx, {
+    await reviseCampaign(db, ctx, {
       campaignId: campaign.id,
       proposal,
       budgetCapMinor: body.budget_cap_minor ?? current.cap_minor,
       requestId,
     });
 
-    return NextResponse.json(buildCampaignDetail(db, ctx, campaign.id), { status: 201 });
+    return NextResponse.json(await buildCampaignDetail(db, ctx, campaign.id), { status: 201 });
   });
 }

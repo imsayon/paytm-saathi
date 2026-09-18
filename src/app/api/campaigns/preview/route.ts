@@ -21,8 +21,8 @@ type PreviewBody = {
 export async function POST(request: Request) {
   return handle(request, async ({ requestId }) => {
     const db = getDb();
-    seedMerchant(db);
-    const ctx = requireMerchantContext(db);
+    await seedMerchant(db);
+    const ctx = await requireMerchantContext(db);
     rateLimit(`preview:${ctx.merchantId}`, 20, 60_000);
 
     const body = await readJson<PreviewBody>(request);
@@ -40,18 +40,16 @@ export async function POST(request: Request) {
       throw new AppError("BAD_REQUEST", "as_of must be a YYYY-MM-DD date.");
     }
 
-    const hasImport = db
-      .prepare(`SELECT id FROM import_batch WHERE merchant_id = ? LIMIT 1`)
-      .get(ctx.merchantId);
+    const hasImport = await db.one(`SELECT id FROM import_batch WHERE merchant_id = $1 LIMIT 1`, [ctx.merchantId]);
     if (!hasImport) {
       throw new AppError("RULE_VIOLATION", "Import payment data before creating a campaign.");
     }
 
-    const signal = computeSignal(db, ctx.merchantId, asOf);
+    const signal = await computeSignal(db, ctx.merchantId, asOf);
     const plannerInput = buildPlannerInput({ intent, signal, budgetCapMinor, timezone: ctx.timezone });
     const planner = await runPlanner(plannerInput);
 
-    const { campaignId } = createCampaignPreview(db, ctx, {
+    const { campaignId } = await createCampaignPreview(db, ctx, {
       intent,
       budgetCapMinor,
       asOf,
@@ -63,7 +61,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        ...buildCampaignDetail(db, ctx, campaignId),
+        ...(await buildCampaignDetail(db, ctx, campaignId)),
         planner: {
           source: planner.source,
           fallback_reason: planner.fallbackReason,

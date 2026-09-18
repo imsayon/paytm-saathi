@@ -1,5 +1,5 @@
 import { recordAudit } from "../audit/events";
-import { getDb, newId, type Db } from "../db/client";
+import { closeDb, getDb, newId, type Db } from "../db/client";
 import { log } from "../observability/log";
 import { mockProvider } from "../providers/mock";
 import type { DeliveryProvider } from "../providers/types";
@@ -31,115 +31,143 @@ export type DrainSummary = {
 };
 
 /**
- * Atomic claim: the conditional UPDATE means a second worker cannot take a job
- * whose lease is still live, and an expired lease becomes claimable again after
- * a crash.
+ * Atomic claim: the row lock with SKIP LOCKED means a second worker cannot take
+ * a job whose lease is still live, and an expired lease becomes claimable again
+ * after a crash. One statement, one round trip, committed before any provider call.
  */
-function claimJob(db: Db, workerId: string): JobRow | null {
+async function claimJob(db: Db, workerId: string): Promise<JobRow | null> {
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
   const leaseExpiry = new Date(now + LEASE_MS).toISOString();
 
-  const claimed = db
-    .prepare(
-      `UPDATE delivery_job
-          SET status = 'PROCESSING', lease_owner = ?, lease_expires_at = ?, updated_at = ?
-        WHERE id = (
-          SELECT id FROM delivery_job
-           WHERE status = 'QUEUED'
-              OR (status = 'UNKNOWN' AND attempt_count < ?)
-              OR (status = 'PROCESSING' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?)
-           ORDER BY rowid
-           LIMIT 1
-        )
-          AND (
-            status = 'QUEUED'
-            OR (status = 'UNKNOWN' AND attempt_count < ?)
-            OR (status = 'PROCESSING' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?)
-          )
-        RETURNING id`,
-    )
-    .get(workerId, leaseExpiry, nowIso, MAX_ATTEMPTS, nowIso, MAX_ATTEMPTS, nowIso) as { id: string } | undefined;
-
-  if (!claimed) return null;
-  return db.prepare(`SELECT * FROM delivery_job WHERE id = ?`).get(claimed.id) as JobRow;
+  const claimed = await db.one<JobRow>(
+    `UPDATE delivery_job
+        SET status = 'PROCESSING', lease_owner = $1, lease_expires_at = $2, updated_at = $3
+      WHERE id = (
+        SELECT id FROM delivery_job
+         WHERE status = 'QUEUED'
+            OR (status = 'UNKNOWN' AND attempt_count < $4)
+            OR (status = 'PROCESSING' AND lease_expires_at IS NOT NULL AND lease_expires_at < $5)
+         ORDER BY seq
+         LIMIT 1
+         FOR UPDATE SKIP LOCKED
+      )
+      RETURNING id, merchant_id, campaign_id, version_id, recipient_id, customer_id, status, provider_key, attempt_count, scenario_slot`,
+    [workerId, leaseExpiry, nowIso, MAX_ATTEMPTS, nowIso],
+  );
+  return claimed ?? null;
 }
 
-function cancelJob(db: Db, job: JobRow, reason: string): void {
-  db.prepare(
-    `UPDATE delivery_job SET status = 'CANCELLED', cancel_reason = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`,
-  ).run(reason, new Date().toISOString(), job.id);
-
-  recordAudit(db, {
-    merchantId: job.merchant_id,
-    campaignId: job.campaign_id,
-    versionId: job.version_id,
-    jobId: job.id,
-    actor: "worker",
-    action: "delivery.cancelled",
-    entity: `delivery_job:${job.id}`,
-    newState: "CANCELLED",
-    details: { reason, provider_called: false },
+async function cancelJob(db: Db, job: JobRow, reason: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.run(
+      `UPDATE delivery_job SET status = 'CANCELLED', cancel_reason = $1, lease_owner = NULL, lease_expires_at = NULL, updated_at = $2 WHERE id = $3`,
+      [reason, new Date().toISOString(), job.id],
+    );
+    await recordAudit(tx, {
+      merchantId: job.merchant_id,
+      campaignId: job.campaign_id,
+      versionId: job.version_id,
+      jobId: job.id,
+      actor: "worker",
+      action: "delivery.cancelled",
+      entity: `delivery_job:${job.id}`,
+      newState: "CANCELLED",
+      details: { reason, provider_called: false },
+    });
   });
 }
 
-/** Consent and version are re-checked here, immediately before any provider call. */
-function preSendBlocker(db: Db, job: JobRow): string | null {
-  const campaign = db
-    .prepare(`SELECT current_version FROM campaign WHERE id = ?`)
-    .get(job.campaign_id) as { current_version: number } | undefined;
-  const version = db
-    .prepare(`SELECT version FROM campaign_version WHERE id = ?`)
-    .get(job.version_id) as { version: number } | undefined;
+type SendContext = {
+  current_version: number | null;
+  version: number | null;
+  approval_id: string | null;
+  consent_state: string | null;
+  contact_ref: string | null;
+  proposal: Proposal | null;
+};
 
-  if (!campaign || !version) return "campaign_or_version_missing";
-  if (campaign.current_version !== version.version) return "version_superseded";
+/**
+ * One read for everything the pre-send check and the send itself need. Consent
+ * and version are re-checked here, immediately before any provider call.
+ */
+async function loadSendContext(db: Db, job: JobRow): Promise<SendContext> {
+  const row = await db.one<SendContext>(
+    `SELECT c.current_version,
+            v.version,
+            v.proposal,
+            cu.contact_ref,
+            (SELECT a.id FROM campaign_approval a WHERE a.version_id = j.version_id AND a.status = 'active' LIMIT 1) AS approval_id,
+            (SELECT cs.state FROM consent cs
+              WHERE cs.merchant_id = j.merchant_id AND cs.customer_id = j.customer_id
+              ORDER BY cs.observed_at DESC, cs.seq DESC LIMIT 1) AS consent_state
+       FROM delivery_job j
+       LEFT JOIN campaign c ON c.id = j.campaign_id
+       LEFT JOIN campaign_version v ON v.id = j.version_id
+       LEFT JOIN customer cu ON cu.id = j.customer_id
+      WHERE j.id = $1`,
+    [job.id],
+  );
+  return (
+    row ?? { current_version: null, version: null, approval_id: null, consent_state: null, contact_ref: null, proposal: null }
+  );
+}
 
-  const approval = db
-    .prepare(`SELECT id FROM campaign_approval WHERE version_id = ? AND status = 'active'`)
-    .get(job.version_id);
-  if (!approval) return "approval_not_active";
-
-  const consent = db
-    .prepare(
-      `SELECT state FROM consent WHERE merchant_id = ? AND customer_id = ? ORDER BY observed_at DESC, rowid DESC LIMIT 1`,
-    )
-    .get(job.merchant_id, job.customer_id) as { state: string } | undefined;
-  if (!consent || consent.state !== "true") return "consent_revoked";
-
-  const customer = db
-    .prepare(`SELECT contact_ref FROM customer WHERE id = ?`)
-    .get(job.customer_id) as { contact_ref: string | null } | undefined;
-  if (!customer?.contact_ref) return "no_contact_ref";
-
+function preSendBlocker(context: SendContext): string | null {
+  if (context.current_version === null || context.version === null || !context.proposal) {
+    return "campaign_or_version_missing";
+  }
+  if (context.current_version !== context.version) return "version_superseded";
+  if (!context.approval_id) return "approval_not_active";
+  if (context.consent_state !== "true") return "consent_revoked";
+  if (!context.contact_ref) return "no_contact_ref";
   return null;
 }
 
-function recordAttempt(
+/** Attempt, job status and audit event land together, so a crash between them cannot leave a half-recorded result. */
+async function settle(
   db: Db,
   job: JobRow,
-  attemptNo: number,
-  outcome: string,
-  raw: string,
-  providerMessageId: string | null,
-  startedAt: string,
-): void {
-  db.prepare(
-    `INSERT INTO delivery_attempt (id, job_id, attempt_no, outcome, provider_message_id, provider_response, started_at, finished_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(newId("att"), job.id, attemptNo, outcome, providerMessageId, raw, startedAt, new Date().toISOString());
-}
-
-function finishJob(db: Db, job: JobRow, status: string, attemptCount: number): void {
-  db.prepare(
-    `UPDATE delivery_job SET status = ?, attempt_count = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`,
-  ).run(status, attemptCount, new Date().toISOString(), job.id);
+  input: {
+    attemptNo: number;
+    outcome: string;
+    raw: string;
+    providerMessageId: string | null;
+    startedAt: string;
+    status: string;
+    audit: { action: string; oldState?: string; details: Record<string, unknown> };
+  },
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.run(
+      `INSERT INTO delivery_attempt (id, job_id, attempt_no, outcome, provider_message_id, provider_response, started_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [newId("att"), job.id, input.attemptNo, input.outcome, input.providerMessageId, input.raw, input.startedAt, new Date().toISOString()],
+    );
+    await tx.run(
+      `UPDATE delivery_job SET status = $1, attempt_count = $2, lease_owner = NULL, lease_expires_at = NULL, updated_at = $3 WHERE id = $4`,
+      [input.status, input.attemptNo, new Date().toISOString(), job.id],
+    );
+    await recordAudit(tx, {
+      merchantId: job.merchant_id,
+      campaignId: job.campaign_id,
+      versionId: job.version_id,
+      jobId: job.id,
+      actor: "worker",
+      action: input.audit.action,
+      entity: `delivery_job:${job.id}`,
+      oldState: input.audit.oldState ?? null,
+      newState: input.status,
+      details: input.audit.details,
+    });
+  });
 }
 
 async function processJob(db: Db, job: JobRow, provider: DeliveryProvider): Promise<string> {
-  const blocker = preSendBlocker(db, job);
+  const context = await loadSendContext(db, job);
+  const blocker = preSendBlocker(context);
   if (blocker) {
-    cancelJob(db, job, blocker);
+    await cancelJob(db, job, blocker);
     return "CANCELLED";
   }
 
@@ -150,59 +178,56 @@ async function processJob(db: Db, job: JobRow, provider: DeliveryProvider): Prom
   // before sending anything again.
   if (job.status === "UNKNOWN" || job.attempt_count > 0) {
     const status = await provider.getStatus(job.provider_key);
-    recordAttempt(db, job, attemptNo, `status_check_${status.state}`, status.raw, null, startedAt);
 
     if (status.state === "delivered") {
-      finishJob(db, job, "DELIVERED", attemptNo);
-      recordAudit(db, {
-        merchantId: job.merchant_id,
-        campaignId: job.campaign_id,
-        versionId: job.version_id,
-        jobId: job.id,
-        actor: "worker",
-        action: "delivery.status_confirmed_delivered",
-        entity: `delivery_job:${job.id}`,
-        oldState: "UNKNOWN",
-        newState: "DELIVERED",
-        details: { provider: provider.name, provider_message_id: status.providerMessageId },
+      await settle(db, job, {
+        attemptNo,
+        outcome: `status_check_${status.state}`,
+        raw: status.raw,
+        providerMessageId: status.providerMessageId,
+        startedAt,
+        status: "DELIVERED",
+        audit: {
+          action: "delivery.status_confirmed_delivered",
+          oldState: "UNKNOWN",
+          details: { provider: provider.name, provider_message_id: status.providerMessageId },
+        },
       });
       return "DELIVERED";
     }
 
     if (status.state === "unavailable") {
-      finishJob(db, job, "NEEDS_REVIEW", attemptNo);
-      recordAudit(db, {
-        merchantId: job.merchant_id,
-        campaignId: job.campaign_id,
-        versionId: job.version_id,
-        jobId: job.id,
-        actor: "worker",
-        action: "delivery.needs_review",
-        entity: `delivery_job:${job.id}`,
-        oldState: "UNKNOWN",
-        newState: "NEEDS_REVIEW",
-        details: {
-          provider: provider.name,
-          reason: "provider status unavailable; automatic retry stopped to avoid duplicate outreach",
+      await settle(db, job, {
+        attemptNo,
+        outcome: `status_check_${status.state}`,
+        raw: status.raw,
+        providerMessageId: null,
+        startedAt,
+        status: "NEEDS_REVIEW",
+        audit: {
+          action: "delivery.needs_review",
+          oldState: "UNKNOWN",
+          details: {
+            provider: provider.name,
+            reason: "provider status unavailable; automatic retry stopped to avoid duplicate outreach",
+          },
         },
       });
       return "NEEDS_REVIEW";
     }
+
+    // Status proves nothing was delivered: record the check, then re-send below.
+    await db.run(
+      `INSERT INTO delivery_attempt (id, job_id, attempt_no, outcome, provider_message_id, provider_response, started_at, finished_at)
+       VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)`,
+      [newId("att"), job.id, attemptNo, `status_check_${status.state}`, status.raw, startedAt, new Date().toISOString()],
+    );
   }
 
-  const proposal = JSON.parse(
-    (db.prepare(`SELECT proposal_json FROM campaign_version WHERE id = ?`).get(job.version_id) as {
-      proposal_json: string;
-    }).proposal_json,
-  ) as Proposal;
-
-  const customer = db.prepare(`SELECT contact_ref FROM customer WHERE id = ?`).get(job.customer_id) as {
-    contact_ref: string;
-  };
-
+  const proposal = context.proposal!;
   const result = await provider.send({
     providerKey: job.provider_key,
-    recipientRef: customer.contact_ref,
+    recipientRef: context.contact_ref!,
     headline: proposal.copy.headline,
     body: proposal.copy.body,
     cta: proposal.copy.cta,
@@ -212,65 +237,61 @@ async function processJob(db: Db, job: JobRow, provider: DeliveryProvider): Prom
   const sendAttemptNo = job.attempt_count > 0 ? attemptNo + 1 : attemptNo;
 
   if (result.outcome === "delivered") {
-    recordAttempt(db, job, sendAttemptNo, "delivered", result.raw, result.providerMessageId, startedAt);
-    finishJob(db, job, "DELIVERED", sendAttemptNo);
-    recordAudit(db, {
-      merchantId: job.merchant_id,
-      campaignId: job.campaign_id,
-      versionId: job.version_id,
-      jobId: job.id,
-      actor: "worker",
-      action: "delivery.delivered",
-      entity: `delivery_job:${job.id}`,
-      newState: "DELIVERED",
-      details: { provider: provider.name, provider_message_id: result.providerMessageId, attempt: sendAttemptNo },
+    await settle(db, job, {
+      attemptNo: sendAttemptNo,
+      outcome: "delivered",
+      raw: result.raw,
+      providerMessageId: result.providerMessageId,
+      startedAt,
+      status: "DELIVERED",
+      audit: {
+        action: "delivery.delivered",
+        details: { provider: provider.name, provider_message_id: result.providerMessageId, attempt: sendAttemptNo },
+      },
     });
     return "DELIVERED";
   }
 
   if (result.outcome === "failed") {
-    recordAttempt(db, job, sendAttemptNo, "failed", result.raw, null, startedAt);
-    finishJob(db, job, "FAILED", sendAttemptNo);
-    recordAudit(db, {
-      merchantId: job.merchant_id,
-      campaignId: job.campaign_id,
-      versionId: job.version_id,
-      jobId: job.id,
-      actor: "worker",
-      action: "delivery.failed",
-      entity: `delivery_job:${job.id}`,
-      newState: "FAILED",
-      details: { provider: provider.name, reason: result.reason, attempt: sendAttemptNo },
+    await settle(db, job, {
+      attemptNo: sendAttemptNo,
+      outcome: "failed",
+      raw: result.raw,
+      providerMessageId: null,
+      startedAt,
+      status: "FAILED",
+      audit: {
+        action: "delivery.failed",
+        details: { provider: provider.name, reason: result.reason, attempt: sendAttemptNo },
+      },
     });
     return "FAILED";
   }
 
-  recordAttempt(db, job, sendAttemptNo, "timeout", result.raw, null, startedAt);
-  finishJob(db, job, "UNKNOWN", sendAttemptNo);
-  recordAudit(db, {
-    merchantId: job.merchant_id,
-    campaignId: job.campaign_id,
-    versionId: job.version_id,
-    jobId: job.id,
-    actor: "worker",
-    action: "delivery.unknown",
-    entity: `delivery_job:${job.id}`,
-    newState: "UNKNOWN",
-    details: {
-      provider: provider.name,
-      attempt: sendAttemptNo,
-      note: "Provider timed out. Status will be checked before any retry.",
+  await settle(db, job, {
+    attemptNo: sendAttemptNo,
+    outcome: "timeout",
+    raw: result.raw,
+    providerMessageId: null,
+    startedAt,
+    status: "UNKNOWN",
+    audit: {
+      action: "delivery.unknown",
+      details: {
+        provider: provider.name,
+        attempt: sendAttemptNo,
+        note: "Provider timed out. Status will be checked before any retry.",
+      },
     },
   });
   return "UNKNOWN";
 }
 
-export function refreshCampaignDeliveryStatus(db: Db, campaignId: string): void {
-  const counts = db
-    .prepare(
-      `SELECT status, COUNT(*) AS n FROM delivery_job WHERE campaign_id = ? AND status != 'CANCELLED' GROUP BY status`,
-    )
-    .all(campaignId) as { status: string; n: number }[];
+export async function refreshCampaignDeliveryStatus(db: Db, campaignId: string): Promise<void> {
+  const counts = await db.all<{ status: string; n: number }>(
+    `SELECT status, COUNT(*)::int AS n FROM delivery_job WHERE campaign_id = $1 AND status != 'CANCELLED' GROUP BY status`,
+    [campaignId],
+  );
 
   const by = (status: string) => counts.find((row) => row.status === status)?.n ?? 0;
   const pending = by("QUEUED") + by("PROCESSING") + by("UNKNOWN");
@@ -279,9 +300,10 @@ export function refreshCampaignDeliveryStatus(db: Db, campaignId: string): void 
   const needsReview = by("NEEDS_REVIEW");
   const total = counts.reduce((sum, row) => sum + row.n, 0);
 
-  const campaign = db.prepare(`SELECT status FROM campaign WHERE id = ?`).get(campaignId) as
-    | { status: string }
-    | undefined;
+  const campaign = await db.one<{ status: string; merchant_id: string }>(
+    `SELECT status, merchant_id FROM campaign WHERE id = $1`,
+    [campaignId],
+  );
   if (!campaign || ["OUTCOME_WINDOW", "REPORTED"].includes(campaign.status)) return;
   if (total === 0) return;
 
@@ -293,22 +315,22 @@ export function refreshCampaignDeliveryStatus(db: Db, campaignId: string): void 
   else next = "SENDING";
 
   if (next !== campaign.status) {
-    db.prepare(`UPDATE campaign SET status = ?, updated_at = ? WHERE id = ?`).run(
-      next,
-      new Date().toISOString(),
-      campaignId,
-    );
-    recordAudit(db, {
-      merchantId: (db.prepare(`SELECT merchant_id FROM campaign WHERE id = ?`).get(campaignId) as {
-        merchant_id: string;
-      }).merchant_id,
-      campaignId,
-      actor: "worker",
-      action: "campaign.delivery_status_changed",
-      entity: `campaign:${campaignId}`,
-      oldState: campaign.status,
-      newState: next,
-      details: { delivered, failed, needs_review: needsReview, pending },
+    await db.transaction(async (tx) => {
+      await tx.run(`UPDATE campaign SET status = $1, updated_at = $2 WHERE id = $3`, [
+        next,
+        new Date().toISOString(),
+        campaignId,
+      ]);
+      await recordAudit(tx, {
+        merchantId: campaign.merchant_id,
+        campaignId,
+        actor: "worker",
+        action: "campaign.delivery_status_changed",
+        entity: `campaign:${campaignId}`,
+        oldState: campaign.status,
+        newState: next,
+        details: { delivered, failed, needs_review: needsReview, pending },
+      });
     });
   }
 }
@@ -332,7 +354,7 @@ export async function drainQueue(
   const touchedCampaigns = new Set<string>();
 
   for (let i = 0; i < maxJobs; i += 1) {
-    const job = claimJob(db, workerId);
+    const job = await claimJob(db, workerId);
     if (!job) break;
     touchedCampaigns.add(job.campaign_id);
 
@@ -345,7 +367,7 @@ export async function drainQueue(
     else if (status === "CANCELLED") summary.cancelled += 1;
   }
 
-  for (const campaignId of touchedCampaigns) refreshCampaignDeliveryStatus(db, campaignId);
+  for (const campaignId of touchedCampaigns) await refreshCampaignDeliveryStatus(db, campaignId);
   return summary;
 }
 
@@ -353,18 +375,24 @@ async function runForever(): Promise<void> {
   const db = getDb();
   log("info", "worker.started", { pid: process.pid, provider: mockProvider.name });
   let running = true;
-  process.on("SIGINT", () => {
+  const stop = () => {
     running = false;
-  });
-  process.on("SIGTERM", () => {
-    running = false;
-  });
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
 
   while (running) {
-    const summary = await drainQueue(db);
-    if (summary.processed > 0) log("info", "worker.drained", { ...summary });
+    try {
+      const summary = await drainQueue(db);
+      if (summary.processed > 0) log("info", "worker.drained", { ...summary });
+    } catch (error) {
+      // A transient database error must not kill the worker; the lease makes
+      // whatever was mid-flight claimable again once it expires.
+      log("error", "worker.iteration_failed", { reason: error instanceof Error ? error.message : "unknown" });
+    }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
+  await closeDb();
   log("info", "worker.stopped", {});
 }
 

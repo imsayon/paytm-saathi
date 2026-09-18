@@ -14,14 +14,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     requireDemoMode();
     const { id } = await params;
     const db = getDb();
-    seedMerchant(db);
-    const ctx = requireMerchantContext(db);
+    await seedMerchant(db);
+    const ctx = await requireMerchantContext(db);
 
-    const simulation = runOutcomeSimulation(db, ctx, id);
+    const simulation = await runOutcomeSimulation(db, ctx, id);
 
     return NextResponse.json({
       simulation: { ...simulation, synthetic: true },
-      campaign: buildCampaignDetail(db, ctx, id),
+      campaign: await buildCampaignDetail(db, ctx, id),
     });
   });
 }

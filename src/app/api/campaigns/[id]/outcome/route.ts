@@ -11,14 +11,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   return handle(request, async () => {
     const { id } = await params;
     const db = getDb();
-    seedMerchant(db);
-    const ctx = requireMerchantContext(db);
+    await seedMerchant(db);
+    const ctx = await requireMerchantContext(db);
 
-    const detail = buildCampaignDetail(db, ctx, id);
+    const detail = await buildCampaignDetail(db, ctx, id);
     const approvalAt = detail.approval?.created_at ?? null;
-    const firstImport = db
-      .prepare(`SELECT imported_at FROM import_batch WHERE merchant_id = ? ORDER BY imported_at ASC LIMIT 1`)
-      .get(ctx.merchantId) as { imported_at: string } | undefined;
+    const firstImport = await db.one<{ imported_at: string }>(
+      `SELECT imported_at FROM import_batch WHERE merchant_id = $1 ORDER BY imported_at ASC LIMIT 1`,
+      [ctx.merchantId],
+    );
 
     const setupSeconds =
       approvalAt && firstImport

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { recordAudit } from "../audit/events";
 import type { MerchantContext } from "../auth/context";
 import { assertOwnedByMerchant } from "../auth/context";
-import { inWriteTransaction, newId, type Db } from "../db/client";
+import { newId, type Db } from "../db/client";
 import { AppError } from "../errors";
 import { validateProposal, type Proposal, type RuleResult } from "./rules";
 import { computeSignal, stableHash, type SignalSummary } from "./signal";
@@ -38,8 +38,8 @@ export type VersionRow = {
   campaign_id: string;
   merchant_id: string;
   version: number;
-  proposal_json: string;
-  rule_result_json: string;
+  proposal: Proposal;
+  rule_result: RuleResult;
   cohort_hash: string;
   cap_minor: number;
   policy_version: string;
@@ -61,25 +61,41 @@ export function providerKeyFor(versionId: string, customerId: string): string {
   return `mock_${crypto.createHash("sha256").update(`${versionId}|${customerId}`).digest("hex").slice(0, 32)}`;
 }
 
-export function loadCampaign(db: Db, ctx: MerchantContext, campaignId: string): CampaignRow {
-  const row = db.prepare(`SELECT * FROM campaign WHERE id = ?`).get(campaignId) as CampaignRow | undefined;
+/**
+ * `forUpdate` takes a row lock inside the caller's transaction, so two
+ * concurrent approvals of the same campaign serialize instead of both reading
+ * "not yet approved".
+ */
+export async function loadCampaign(
+  db: Db,
+  ctx: MerchantContext,
+  campaignId: string,
+  options: { forUpdate?: boolean } = {},
+): Promise<CampaignRow> {
+  const row = await db.one<CampaignRow>(
+    `SELECT * FROM campaign WHERE id = $1${options.forUpdate ? " FOR UPDATE" : ""}`,
+    [campaignId],
+  );
   if (!row) throw new AppError("NOT_FOUND", "Campaign not found.");
   assertOwnedByMerchant(row.merchant_id, ctx);
   return row;
 }
 
-export function loadVersion(db: Db, campaignId: string, version: number): VersionRow {
-  const row = db
-    .prepare(`SELECT * FROM campaign_version WHERE campaign_id = ? AND version = ?`)
-    .get(campaignId, version) as VersionRow | undefined;
+export async function loadVersion(db: Db, campaignId: string, version: number): Promise<VersionRow> {
+  const row = await db.one<VersionRow>(`SELECT * FROM campaign_version WHERE campaign_id = $1 AND version = $2`, [
+    campaignId,
+    version,
+  ]);
   if (!row) throw new AppError("NOT_FOUND", `Version ${version} not found for this campaign.`);
   return row;
 }
 
-export function listRecipients(db: Db, versionId: string): RecipientRow[] {
-  return db
-    .prepare(`SELECT * FROM campaign_recipient WHERE version_id = ? ORDER BY assignment_group, rowid`)
-    .all(versionId) as RecipientRow[];
+export function listRecipients(db: Db, versionId: string): Promise<RecipientRow[]> {
+  return db.all<RecipientRow>(
+    `SELECT id, version_id, customer_id, assignment_group, eligibility_reason, reward_amount_minor
+       FROM campaign_recipient WHERE version_id = $1 ORDER BY assignment_group, seq`,
+    [versionId],
+  );
 }
 
 /**
@@ -98,8 +114,8 @@ function assignGroups(campaignId: string, signal: SignalSummary): { customerId: 
   }));
 }
 
-function writeVersion(
-  db: Db,
+async function writeVersion(
+  tx: Db,
   input: {
     ctx: MerchantContext;
     campaignId: string;
@@ -110,36 +126,34 @@ function writeVersion(
     capMinor: number;
     aiSource: "model" | "template_fallback";
   },
-): VersionRow {
+): Promise<VersionRow> {
   const versionId = newId("ver");
   const now = new Date().toISOString();
 
-  db.prepare(
+  await tx.run(
     `INSERT INTO campaign_version
-       (id, campaign_id, merchant_id, version, proposal_json, rule_result_json, cohort_hash, cap_minor, policy_version, ai_source, created_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    versionId,
-    input.campaignId,
-    input.ctx.merchantId,
-    input.version,
-    JSON.stringify(input.proposal),
-    JSON.stringify(input.ruleResult),
-    input.signal.cohortHash,
-    input.capMinor,
-    input.signal.policy.version,
-    input.aiSource,
-    input.ctx.actor,
-    now,
+       (id, campaign_id, merchant_id, version, proposal, rule_result, cohort_hash, cap_minor, policy_version, ai_source, created_by, created_at)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12)`,
+    [
+      versionId,
+      input.campaignId,
+      input.ctx.merchantId,
+      input.version,
+      JSON.stringify(input.proposal),
+      JSON.stringify(input.ruleResult),
+      input.signal.cohortHash,
+      input.capMinor,
+      input.signal.policy.version,
+      input.aiSource,
+      input.ctx.actor,
+      now,
+    ],
   );
 
-  const insertRecipient = db.prepare(
-    `INSERT INTO campaign_recipient
-       (id, version_id, merchant_id, customer_id, assignment_group, eligibility_reason, reward_amount_minor)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  );
-  for (const assignment of assignGroups(input.campaignId, input.signal)) {
-    insertRecipient.run(
+  await tx.insertMany(
+    "campaign_recipient",
+    ["id", "version_id", "merchant_id", "customer_id", "assignment_group", "eligibility_reason", "reward_amount_minor"],
+    assignGroups(input.campaignId, input.signal).map((assignment) => [
       newId("rcp"),
       versionId,
       input.ctx.merchantId,
@@ -147,19 +161,18 @@ function writeVersion(
       assignment.group,
       `regular_absent_${input.signal.policy.inactivityDays}d_consented`,
       assignment.group === "campaign" ? input.proposal.offer.amount_minor : 0,
-    );
-  }
-
-  const insertExclusion = db.prepare(
-    `INSERT INTO campaign_exclusion (id, version_id, merchant_id, customer_id, reason) VALUES (?, ?, ?, ?, ?)`,
+    ]),
   );
-  for (const customer of input.signal.absent) {
-    if (customer.exclusionReason) {
-      insertExclusion.run(newId("exc"), versionId, input.ctx.merchantId, customer.customerId, customer.exclusionReason);
-    }
-  }
 
-  return loadVersion(db, input.campaignId, input.version);
+  await tx.insertMany(
+    "campaign_exclusion",
+    ["id", "version_id", "merchant_id", "customer_id", "reason"],
+    input.signal.absent
+      .filter((customer) => customer.exclusionReason)
+      .map((customer) => [newId("exc"), versionId, input.ctx.merchantId, customer.customerId, customer.exclusionReason]),
+  );
+
+  return loadVersion(tx, input.campaignId, input.version);
 }
 
 export type PreviewInput = {
@@ -172,24 +185,25 @@ export type PreviewInput = {
   requestId?: string;
 };
 
-export function createCampaignPreview(db: Db, ctx: MerchantContext, input: PreviewInput) {
-  const signal = computeSignal(db, ctx.merchantId, input.asOf);
+export async function createCampaignPreview(db: Db, ctx: MerchantContext, input: PreviewInput) {
+  const signal = await computeSignal(db, ctx.merchantId, input.asOf);
   const ruleResult = validateProposal({
     proposal: input.proposal,
     signal,
     budgetCapMinor: input.budgetCapMinor,
   });
 
-  return inWriteTransaction(db, () => {
+  return db.transaction(async (tx) => {
     const campaignId = newId("cmp");
     const now = new Date().toISOString();
 
-    db.prepare(
+    await tx.run(
       `INSERT INTO campaign (id, merchant_id, intent, status, current_version, as_of, created_at, updated_at)
-       VALUES (?, ?, ?, 'REVIEW', 1, ?, ?, ?)`,
-    ).run(campaignId, ctx.merchantId, input.intent, input.asOf, now, now);
+       VALUES ($1, $2, $3, 'REVIEW', 1, $4, $5, $6)`,
+      [campaignId, ctx.merchantId, input.intent, input.asOf, now, now],
+    );
 
-    const version = writeVersion(db, {
+    const version = await writeVersion(tx, {
       ctx,
       campaignId,
       version: 1,
@@ -200,7 +214,7 @@ export function createCampaignPreview(db: Db, ctx: MerchantContext, input: Previ
       aiSource: input.aiSource,
     });
 
-    recordAudit(db, {
+    await recordAudit(tx, {
       merchantId: ctx.merchantId,
       campaignId,
       versionId: version.id,
@@ -232,22 +246,24 @@ export type ReviseInput = {
   requestId?: string;
 };
 
-export function reviseCampaign(db: Db, ctx: MerchantContext, input: ReviseInput) {
-  const campaign = loadCampaign(db, ctx, input.campaignId);
-  if (["REPORTED", "EXPIRED", "FAILED"].includes(campaign.status)) {
-    throw new AppError("RULE_VIOLATION", `A ${campaign.status} campaign cannot be revised.`);
+export async function reviseCampaign(db: Db, ctx: MerchantContext, input: ReviseInput) {
+  const existing = await loadCampaign(db, ctx, input.campaignId);
+  if (["REPORTED", "EXPIRED", "FAILED"].includes(existing.status)) {
+    throw new AppError("RULE_VIOLATION", `A ${existing.status} campaign cannot be revised.`);
   }
 
-  const signal = computeSignal(db, ctx.merchantId, campaign.as_of);
+  const signal = await computeSignal(db, ctx.merchantId, existing.as_of);
   const ruleResult = validateProposal({
     proposal: input.proposal,
     signal,
     budgetCapMinor: input.budgetCapMinor,
   });
 
-  return inWriteTransaction(db, () => {
+  return db.transaction(async (tx) => {
+    // Re-read under a row lock so two concurrent edits cannot both become "version N+1".
+    const campaign = await loadCampaign(tx, ctx, input.campaignId, { forUpdate: true });
     const nextVersion = campaign.current_version + 1;
-    const version = writeVersion(db, {
+    const version = await writeVersion(tx, {
       ctx,
       campaignId: campaign.id,
       version: nextVersion,
@@ -259,25 +275,25 @@ export function reviseCampaign(db: Db, ctx: MerchantContext, input: ReviseInput)
     });
 
     // A changed plan cannot inherit an old authorization.
-    const expired = db
-      .prepare(`UPDATE campaign_approval SET status = 'expired' WHERE campaign_id = ? AND status = 'active'`)
-      .run(campaign.id);
+    const approvalsExpired = await tx.run(
+      `UPDATE campaign_approval SET status = 'expired' WHERE campaign_id = $1 AND status = 'active'`,
+      [campaign.id],
+    );
 
-    const cancelled = db
-      .prepare(
-        `UPDATE delivery_job
-            SET status = 'CANCELLED', cancel_reason = 'version_superseded', updated_at = ?
-          WHERE campaign_id = ? AND status = 'QUEUED'`,
-      )
-      .run(new Date().toISOString(), campaign.id);
+    const jobsCancelled = await tx.run(
+      `UPDATE delivery_job
+          SET status = 'CANCELLED', cancel_reason = 'version_superseded', updated_at = $1
+        WHERE campaign_id = $2 AND status = 'QUEUED'`,
+      [new Date().toISOString(), campaign.id],
+    );
 
-    db.prepare(`UPDATE campaign SET current_version = ?, status = 'REVIEW', updated_at = ? WHERE id = ?`).run(
+    await tx.run(`UPDATE campaign SET current_version = $1, status = 'REVIEW', updated_at = $2 WHERE id = $3`, [
       nextVersion,
       new Date().toISOString(),
       campaign.id,
-    );
+    ]);
 
-    recordAudit(db, {
+    await recordAudit(tx, {
       merchantId: ctx.merchantId,
       campaignId: campaign.id,
       versionId: version.id,
@@ -290,8 +306,8 @@ export function reviseCampaign(db: Db, ctx: MerchantContext, input: ReviseInput)
       details: {
         version: nextVersion,
         previous_version: campaign.current_version,
-        approvals_expired: expired.changes,
-        queued_jobs_cancelled: cancelled.changes,
+        approvals_expired: approvalsExpired,
+        queued_jobs_cancelled: jobsCancelled,
         reward_minor: input.proposal.offer.amount_minor,
         estimated_cost_minor: ruleResult.estimated_cost_minor,
         rules_passed: ruleResult.eligible,
@@ -318,29 +334,28 @@ export type ApproveResult = {
   replayed: boolean;
 };
 
-export function approveCampaign(db: Db, ctx: MerchantContext, input: ApproveInput): ApproveResult {
+export async function approveCampaign(db: Db, ctx: MerchantContext, input: ApproveInput): Promise<ApproveResult> {
   if (!input.idempotencyKey.trim()) {
     throw new AppError("BAD_REQUEST", "An Idempotency-Key header is required to approve a campaign.");
   }
 
-  return inWriteTransaction(db, () => {
-    const campaign = loadCampaign(db, ctx, input.campaignId);
+  return db.transaction(async (tx) => {
+    const campaign = await loadCampaign(tx, ctx, input.campaignId, { forUpdate: true });
     const fingerprint = crypto
       .createHash("sha256")
       .update(`${campaign.id}|${input.version}`)
       .digest("hex");
 
-    const priorByKey = db
-      .prepare(`SELECT * FROM campaign_approval WHERE merchant_id = ? AND idempotency_key = ?`)
-      .get(ctx.merchantId, input.idempotencyKey) as
-      | {
-          id: string;
-          campaign_id: string;
-          version_id: string;
-          version: number;
-          request_fingerprint: string;
-        }
-      | undefined;
+    const priorByKey = await tx.one<{
+      id: string;
+      campaign_id: string;
+      version_id: string;
+      version: number;
+      request_fingerprint: string;
+    }>(`SELECT id, campaign_id, version_id, version, request_fingerprint FROM campaign_approval WHERE merchant_id = $1 AND idempotency_key = $2`, [
+      ctx.merchantId,
+      input.idempotencyKey,
+    ]);
 
     if (priorByKey) {
       if (priorByKey.request_fingerprint !== fingerprint) {
@@ -349,20 +364,15 @@ export function approveCampaign(db: Db, ctx: MerchantContext, input: ApproveInpu
           "This Idempotency-Key was already used for a different approval request.",
         );
       }
-      const jobsQueued = (
-        db.prepare(`SELECT COUNT(*) AS n FROM delivery_job WHERE version_id = ?`).get(priorByKey.version_id) as {
-          n: number;
-        }
-      ).n;
-      const current = db.prepare(`SELECT status FROM campaign WHERE id = ?`).get(campaign.id) as {
-        status: CampaignStatus;
-      };
+      const jobs = await tx.one<{ n: number }>(`SELECT COUNT(*)::int AS n FROM delivery_job WHERE version_id = $1`, [
+        priorByKey.version_id,
+      ]);
       return {
         approvalId: priorByKey.id,
         versionId: priorByKey.version_id,
         version: priorByKey.version,
-        status: current.status,
-        jobsQueued,
+        status: campaign.status,
+        jobsQueued: jobs?.n ?? 0,
         replayed: true,
       };
     }
@@ -383,18 +393,18 @@ export function approveCampaign(db: Db, ctx: MerchantContext, input: ApproveInpu
       );
     }
 
-    const version = loadVersion(db, campaign.id, input.version);
-    const alreadyApproved = db
-      .prepare(`SELECT id FROM campaign_approval WHERE version_id = ? AND status = 'active'`)
-      .get(version.id);
+    const version = await loadVersion(tx, campaign.id, input.version);
+    const alreadyApproved = await tx.one(`SELECT id FROM campaign_approval WHERE version_id = $1 AND status = 'active'`, [
+      version.id,
+    ]);
     if (alreadyApproved) {
       throw new AppError("DUPLICATE_APPROVAL", "This version was already approved with a different key.");
     }
 
     // Re-run the same rules against fresh data: consent or eligibility may have
     // changed between preview and approval.
-    const signal = computeSignal(db, ctx.merchantId, campaign.as_of);
-    const proposal = JSON.parse(version.proposal_json) as Proposal;
+    const signal = await computeSignal(tx, ctx.merchantId, campaign.as_of);
+    const proposal = version.proposal;
     const ruleResult = validateProposal({ proposal, signal, budgetCapMinor: version.cap_minor });
 
     if (!ruleResult.eligible) {
@@ -411,7 +421,7 @@ export function approveCampaign(db: Db, ctx: MerchantContext, input: ApproveInpu
       );
     }
 
-    const recipients = listRecipients(db, version.id);
+    const recipients = await listRecipients(tx, version.id);
     const campaignGroup = recipients.filter((recipient) => recipient.assignment_group === "campaign");
     const stillEligible = new Set(signal.eligible.map((customer) => customer.customerId));
     const lostConsent = campaignGroup.filter((recipient) => !stillEligible.has(recipient.customer_id));
@@ -425,50 +435,39 @@ export function approveCampaign(db: Db, ctx: MerchantContext, input: ApproveInpu
 
     const now = new Date().toISOString();
     const approvalId = newId("apr");
-    db.prepare(
+    await tx.run(
       `INSERT INTO campaign_approval
          (id, campaign_id, merchant_id, version_id, version, approver, idempotency_key, request_fingerprint, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
-    ).run(
-      approvalId,
-      campaign.id,
-      ctx.merchantId,
-      version.id,
-      version.version,
-      ctx.actor,
-      input.idempotencyKey,
-      fingerprint,
-      now,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9)`,
+      [approvalId, campaign.id, ctx.merchantId, version.id, version.version, ctx.actor, input.idempotencyKey, fingerprint, now],
     );
 
     // Only the campaign group is contacted. The holdout is the control and must
     // never receive a message, so it never gets a delivery job.
-    const insertJob = db.prepare(
-      `INSERT INTO delivery_job
-         (id, merchant_id, campaign_id, version_id, recipient_id, customer_id, status, provider_key, scenario_slot, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?)`,
-    );
     const ordered = [...campaignGroup].sort((a, b) =>
       providerKeyFor(version.id, a.customer_id).localeCompare(providerKeyFor(version.id, b.customer_id)),
     );
-    ordered.forEach((recipient, slot) => {
-      insertJob.run(
+    await tx.insertMany(
+      "delivery_job",
+      ["id", "merchant_id", "campaign_id", "version_id", "recipient_id", "customer_id", "status", "provider_key", "scenario_slot", "created_at", "updated_at"],
+      ordered.map((recipient, slot) => [
         newId("job"),
         ctx.merchantId,
         campaign.id,
         version.id,
         recipient.id,
         recipient.customer_id,
+        "QUEUED",
         providerKeyFor(version.id, recipient.customer_id),
         slot,
         now,
         now,
-      );
-    });
+      ]),
+    );
 
-    db.prepare(`UPDATE campaign SET status = 'QUEUED', updated_at = ? WHERE id = ?`).run(now, campaign.id);
+    await tx.run(`UPDATE campaign SET status = 'QUEUED', updated_at = $1 WHERE id = $2`, [now, campaign.id]);
 
-    recordAudit(db, {
+    await recordAudit(tx, {
       merchantId: ctx.merchantId,
       campaignId: campaign.id,
       versionId: version.id,
@@ -487,7 +486,7 @@ export function approveCampaign(db: Db, ctx: MerchantContext, input: ApproveInpu
       },
     });
 
-    recordAudit(db, {
+    await recordAudit(tx, {
       merchantId: ctx.merchantId,
       campaignId: campaign.id,
       versionId: version.id,

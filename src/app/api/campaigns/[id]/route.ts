@@ -11,8 +11,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   return handle(request, async () => {
     const { id } = await params;
     const db = getDb();
-    seedMerchant(db);
-    const ctx = requireMerchantContext(db);
-    return NextResponse.json(buildCampaignDetail(db, ctx, id));
+    await seedMerchant(db);
+    const ctx = await requireMerchantContext(db);
+    return NextResponse.json(await buildCampaignDetail(db, ctx, id));
   });
 }

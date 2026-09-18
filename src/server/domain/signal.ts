@@ -65,38 +65,40 @@ export function stableHash(...parts: string[]): string {
   return crypto.createHash("sha256").update(parts.join("|")).digest("hex");
 }
 
-function latestConsentByCustomer(db: Db, merchantId: string): Map<string, "true" | "false" | "unknown"> {
-  const rows = db
-    .prepare(
-      `SELECT customer_id, state
-         FROM consent
-        WHERE merchant_id = ?
-        ORDER BY observed_at ASC, rowid ASC`,
-    )
-    .all(merchantId) as { customer_id: string; state: "true" | "false" | "unknown" }[];
+async function latestConsentByCustomer(
+  db: Db,
+  merchantId: string,
+): Promise<Map<string, "true" | "false" | "unknown">> {
+  const rows = await db.all<{ customer_id: string; state: "true" | "false" | "unknown" }>(
+    `SELECT customer_id, state
+       FROM consent
+      WHERE merchant_id = $1
+      ORDER BY observed_at ASC, seq ASC`,
+    [merchantId],
+  );
 
   const latest = new Map<string, "true" | "false" | "unknown">();
   for (const row of rows) latest.set(row.customer_id, row.state);
   return latest;
 }
 
-export function computeSignal(db: Db, merchantId: string, asOf: string): SignalSummary {
+export async function computeSignal(db: Db, merchantId: string, asOf: string): Promise<SignalSummary> {
   const windowStart = addDays(asOf, -RETENTION_POLICY.lookbackDays);
   const inactivityStart = addDays(asOf, -RETENTION_POLICY.inactivityDays);
 
-  const customers = db
-    .prepare(`SELECT id, external_id, display_name, contact_ref FROM customer WHERE merchant_id = ?`)
-    .all(merchantId) as CustomerRow[];
-
-  const payments = db
-    .prepare(
+  const [customers, payments, consentByCustomer] = await Promise.all([
+    db.all<CustomerRow>(
+      `SELECT id, external_id, display_name, contact_ref FROM customer WHERE merchant_id = $1 ORDER BY external_id`,
+      [merchantId],
+    ),
+    db.all<PaymentRow>(
       `SELECT customer_id, local_date, status
          FROM payment
-        WHERE merchant_id = ? AND status = 'settled' AND local_date >= ? AND local_date <= ?`,
-    )
-    .all(merchantId, windowStart, asOf) as PaymentRow[];
-
-  const consentByCustomer = latestConsentByCustomer(db, merchantId);
+        WHERE merchant_id = $1 AND status = 'settled' AND local_date >= $2 AND local_date <= $3`,
+      [merchantId, windowStart, asOf],
+    ),
+    latestConsentByCustomer(db, merchantId),
+  ]);
   const byCustomer = new Map<string, PaymentRow[]>();
   for (const payment of payments) {
     const list = byCustomer.get(payment.customer_id);

@@ -4,10 +4,10 @@ import { splitGroups, validateProposal } from "../../src/server/domain/rules";
 import { computeSignal, type SignalSummary } from "../../src/server/domain/signal";
 import { absentRegularRows, AS_OF, importRows, proposalOf, seedMerchant, tempDb } from "../helpers";
 
-function signalWith(count: number): SignalSummary {
-  const db = tempDb();
-  const ctx = seedMerchant(db);
-  importRows(
+async function signalWith(count: number): Promise<SignalSummary> {
+  const db = await tempDb();
+  const ctx = await seedMerchant(db);
+  await importRows(
     db,
     ctx,
     Array.from({ length: count }, (_, index) => absentRegularRows(`C${String(index).padStart(2, "0")}`)).flat(),
@@ -15,7 +15,7 @@ function signalWith(count: number): SignalSummary {
   return computeSignal(db, ctx.merchantId, AS_OF);
 }
 
-const TWENTY = signalWith(20);
+const TWENTY = await signalWith(20);
 
 test("exposure is cohort size times reward, in integer paise", () => {
   const result = validateProposal({
@@ -51,8 +51,8 @@ test("exposure exactly equal to the cap is allowed", () => {
   assert.equal(result.eligible, true);
 });
 
-test("an empty cohort blocks the campaign", () => {
-  const result = validateProposal({ proposal: proposalOf(), signal: signalWith(0), budgetCapMinor: 30_000 });
+test("an empty cohort blocks the campaign", async () => {
+  const result = validateProposal({ proposal: proposalOf(), signal: await signalWith(0), budgetCapMinor: 30_000 });
   assert.equal(result.eligible, false);
   assert.ok(result.errors.some((error) => error.code === "NO_ELIGIBLE_COHORT"));
 });

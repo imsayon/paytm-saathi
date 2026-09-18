@@ -5,54 +5,59 @@ import { seedMerchant, tempDb } from "../helpers";
 
 type OutcomeSpec = { group: "campaign" | "holdout"; returned: boolean; amount?: number; reward?: number; optedOut?: boolean };
 
-function reportFor(specs: OutcomeSpec[]) {
-  const db = tempDb();
-  const ctx = seedMerchant(db);
+async function reportFor(specs: OutcomeSpec[]) {
+  const db = await tempDb();
+  const ctx = await seedMerchant(db);
   const campaignId = "cmp_test";
   const versionId = "ver_test";
   const now = new Date().toISOString();
 
-  db.prepare(
+  await db.run(
     `INSERT INTO campaign (id, merchant_id, intent, status, current_version, as_of, created_at, updated_at)
-     VALUES (?, ?, 'test', 'REPORTED', 1, '2026-09-01', ?, ?)`,
-  ).run(campaignId, ctx.merchantId, now, now);
-  db.prepare(
+     VALUES ($1, $2, 'test', 'REPORTED', 1, '2026-09-01', $3, $4)`,
+    [campaignId, ctx.merchantId, now, now],
+  );
+  await db.run(
     `INSERT INTO campaign_version
-       (id, campaign_id, merchant_id, version, proposal_json, rule_result_json, cohort_hash, cap_minor, policy_version, ai_source, created_by, created_at)
-     VALUES (?, ?, ?, 1, '{}', '{}', 'hash', 30000, 'retention-v1', 'template_fallback', 'test', ?)`,
-  ).run(versionId, campaignId, ctx.merchantId, now);
+       (id, campaign_id, merchant_id, version, proposal, rule_result, cohort_hash, cap_minor, policy_version, ai_source, created_by, created_at)
+     VALUES ($1, $2, $3, 1, '{}'::jsonb, '{}'::jsonb, 'hash', 30000, 'retention-v1', 'template_fallback', 'test', $4)`,
+    [versionId, campaignId, ctx.merchantId, now],
+  );
 
-  specs.forEach((_, index) => {
-    db.prepare(
-      `INSERT INTO customer (id, merchant_id, external_id, display_name, contact_ref, created_at)
-       VALUES (?, ?, ?, ?, 'ref', ?)`,
-    ).run(`cus_${index}`, ctx.merchantId, `C${index}`, `Synthetic C${index}`, now);
-  });
+  await db.insertMany(
+    "customer",
+    ["id", "merchant_id", "external_id", "display_name", "contact_ref", "created_at"],
+    specs.map((_, index) => [`cus_${index}`, ctx.merchantId, `C${index}`, `Synthetic C${index}`, "ref", now]),
+  );
 
-  specs.forEach((spec, index) => {
-    db.prepare(
-      `INSERT INTO outcome
-         (id, merchant_id, campaign_id, version_id, customer_id, assignment_group, returned, return_at,
-          settled_amount_minor, reward_cost_minor, opted_out, window_start, window_end, simulated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, '2026-09-02', '2026-09-09', 1)`,
-    ).run(
+  await db.insertMany(
+    "outcome",
+    [
+      "id", "merchant_id", "campaign_id", "version_id", "customer_id", "assignment_group", "returned", "return_at",
+      "settled_amount_minor", "reward_cost_minor", "opted_out", "window_start", "window_end", "simulated",
+    ],
+    specs.map((spec, index) => [
       `out_${index}`,
       ctx.merchantId,
       campaignId,
       versionId,
       `cus_${index}`,
       spec.group,
-      spec.returned ? 1 : 0,
+      spec.returned,
+      null,
       spec.returned ? (spec.amount ?? 18_000) : 0,
       spec.reward ?? 0,
-      spec.optedOut ? 1 : 0,
-    );
-  });
+      Boolean(spec.optedOut),
+      "2026-09-02",
+      "2026-09-09",
+      true,
+    ]),
+  );
 
   return buildReport(db, campaignId, versionId);
 }
 
-test("the documented fixture scenario reproduces every headline number", () => {
+test("the documented fixture scenario reproduces every headline number", async () => {
   const specs: OutcomeSpec[] = [
     ...Array.from({ length: 6 }, () => ({ group: "campaign" as const, returned: true, reward: 1500 })),
     ...Array.from({ length: 4 }, () => ({ group: "campaign" as const, returned: false })),
@@ -60,7 +65,7 @@ test("the documented fixture scenario reproduces every headline number", () => {
     ...Array.from({ length: 8 }, () => ({ group: "holdout" as const, returned: false })),
   ];
 
-  const report = reportFor(specs);
+  const report = await reportFor(specs);
 
   assert.equal(report.campaign.return_rate, 0.6);
   assert.equal(report.holdout.return_rate, 0.2);
@@ -73,16 +78,16 @@ test("the documented fixture scenario reproduces every headline number", () => {
   assert.equal(report.contribution_proxy_minor, 63_000);
 });
 
-test("an empty campaign reports zero rates instead of dividing by zero", () => {
-  const report = reportFor([]);
+test("an empty campaign reports zero rates instead of dividing by zero", async () => {
+  const report = await reportFor([]);
   assert.equal(report.has_outcomes, false);
   assert.equal(report.campaign.return_rate, 0);
   assert.equal(report.holdout.return_rate, 0);
   assert.equal(report.observed_lift_pp, 0);
 });
 
-test("a holdout that outperforms the campaign reports a negative difference honestly", () => {
-  const report = reportFor([
+test("a holdout that outperforms the campaign reports a negative difference honestly", async () => {
+  const report = await reportFor([
     { group: "campaign", returned: true, reward: 1500 },
     { group: "campaign", returned: false },
     { group: "holdout", returned: true },
@@ -95,8 +100,8 @@ test("a holdout that outperforms the campaign reports a negative difference hone
   assert.ok(report.contribution_proxy_minor < 0);
 });
 
-test("opt-outs are counted across both groups", () => {
-  const report = reportFor([
+test("opt-outs are counted across both groups", async () => {
+  const report = await reportFor([
     { group: "campaign", returned: false, optedOut: true },
     { group: "campaign", returned: true, reward: 1500 },
     { group: "holdout", returned: false },
@@ -104,8 +109,8 @@ test("opt-outs are counted across both groups", () => {
   assert.equal(report.opt_outs, 1);
 });
 
-test("the report always carries the synthetic and proxy caveats", () => {
-  const report = reportFor([{ group: "campaign", returned: true, reward: 1500 }]);
+test("the report always carries the synthetic and proxy caveats", async () => {
+  const report = await reportFor([{ group: "campaign", returned: true, reward: 1500 }]);
   assert.ok(report.caveats.some((caveat) => caveat.toLowerCase().includes("synthetic")));
   assert.ok(report.caveats.some((caveat) => caveat.toLowerCase().includes("not profit")));
   assert.ok(Object.keys(report.formulas).length >= 5);
