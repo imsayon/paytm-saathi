@@ -16,3 +16,8 @@ coverage/
 *.sqlite3
 .DS_Store
 
+test-results/
+playwright-report/
+data/*.db-wal
+data/*.db-shm
+tsconfig.tsbuildinfo
