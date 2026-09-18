@@ -19,17 +19,19 @@ The boundary that matters: **no provider call exists until merchant approval suc
 
 The application stores everything in a Neon Postgres database. You need two connection strings from the Neon console: the **pooled** endpoint for the app and the **direct** endpoint for migrations.
 
+The repository uses [pnpm](https://pnpm.io) (`npm install -g pnpm` or `corepack enable pnpm`) and Node 22 or newer.
+
 ```bash
-npm install
+pnpm install
 cp .env.example .env      # paste DATABASE_URL (pooled) and DATABASE_URL_UNPOOLED (direct)
-npm run db:migrate        # applies db/migrations/*.sql over the direct connection
-npm run db:seed           # seeds the demo merchant, imports the fixture, prints the signal
-npm run dev
+pnpm db:migrate           # applies db/migrations/*.sql over the direct connection
+pnpm db:seed              # seeds the demo merchant, imports the fixture, prints the signal
+pnpm dev
 ```
 
 Open http://localhost:3000 and follow the five numbered steps in the header. `GET /api/healthz` confirms the database is reachable; `GET /api/readyz` confirms every migration is applied.
 
-`npm run db:seed` is safe to re-run: the import is checksum-idempotent. The import screen also has a **Reset demo data** control that clears the demo merchant's campaigns, jobs and outcomes so the sequence can be rehearsed again on the same database.
+`pnpm db:seed` is safe to re-run: the import is checksum-idempotent. The import screen also has a **Reset demo data** control that clears the demo merchant's campaigns, jobs and outcomes so the sequence can be rehearsed again on the same database.
 
 Optional, for the model-backed planner:
 
@@ -44,16 +46,16 @@ Without a key the planner uses a deterministic template and labels every proposa
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Next.js app and API on port 3000 |
-| `npm run db:migrate` | Apply pending migrations from `db/migrations/` (direct connection) |
-| `npm run db:seed` | Seed merchant, import the fixture, print the signal |
-| `npm run worker` | Run the delivery worker as its own process |
-| `npm test` | Unit and integration tests against a real Postgres (see below) |
-| `npm run test:e2e` | Playwright smoke test of the whole demo path on a production build |
-| `npm run typecheck` | TypeScript, no emit |
-| `npx tsx scripts/generate-fixture.ts` | Regenerate the committed fixture CSV |
+| `pnpm dev` | Next.js app and API on port 3000 |
+| `pnpm db:migrate` | Apply pending migrations from `db/migrations/` (direct connection) |
+| `pnpm db:seed` | Seed merchant, import the fixture, print the signal |
+| `pnpm worker` | Run the delivery worker as its own process |
+| `pnpm test` | Unit and integration tests against a real Postgres (see below) |
+| `pnpm test:e2e` | Playwright smoke test of the whole demo path on a production build |
+| `pnpm typecheck` | TypeScript, no emit |
+| `pnpm fixture:generate` | Regenerate the committed fixture CSV |
 
-The UI has demo controls for delivery and the outcome clock, so a presenter never needs a second terminal. `npm run worker` exists to show the same jobs being drained by a real background process.
+The UI has demo controls for delivery and the outcome clock, so a presenter never needs a second terminal. `pnpm worker` exists to show the same jobs being drained by a real background process.
 
 ### Tests need a test database
 
@@ -77,7 +79,7 @@ One TypeScript application. One Neon Postgres database. One optional worker proc
 
 ```
 db/migrations/           Schema as numbered SQL files, applied by scripts/migrate.ts
-src/app/                 Next.js routes: 5 merchant screens + the API
+src/app/                 Next.js 16 routes: 5 merchant screens + the API
 src/server/
   config.ts              Environment configuration (pooled URL for the app, direct URL for migrations)
   auth/context.ts        Development-only merchant session (refuses outside demo mode)

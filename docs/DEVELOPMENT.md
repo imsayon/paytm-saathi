@@ -7,18 +7,20 @@ The P0 vertical slice is implemented and verified against Neon Postgres: import,
 Start here:
 
 ```bash
-npm install
+pnpm install
 cp .env.example .env     # paste the Neon pooled, direct and test connection strings
-npm run db:migrate && npm run db:seed && npm run dev
+pnpm db:migrate && pnpm db:seed && pnpm dev
 ```
+
+Stack: Next.js 16 (Turbopack), React 19.3, TypeScript 5.9, zod 4, openai 7, pg 8, Playwright 1.63, Node 22+, pnpm 12. `pnpm-workspace.yaml` approves esbuild's install script (pnpm 12 blocks dependency scripts by default); add any new native dependency there.
 
 See [`README.md`](../README.md) for architecture, the responsibility boundary, and the API.
 
 ## Database
 
 - **Neon project** `paytm-saathi` (`sweet-silence-04926894`, region `aws-ap-southeast-1`, Postgres 17). Branch `production` is the default and holds demo data; branch `test` is disposable and is what `TEST_DATABASE_URL` should point to.
-- **Two URLs.** `DATABASE_URL` is the pooled endpoint (host contains `-pooler`) and serves the app and worker. `DATABASE_URL_UNPOOLED` is the direct endpoint and serves `npm run db:migrate`. The pooler runs in transaction mode, so nothing in the app relies on session state; every multi-statement unit of work is an explicit transaction on one checked-out client (`Db.transaction`).
-- **Migrations are files.** `db/migrations/NNNN_name.sql`, applied in order by `scripts/migrate.ts`, recorded with a checksum in `schema_migration`. An applied file whose checksum changed fails the run — add a new file instead. `GET /api/readyz` reports pending migrations.
+- **Two URLs.** `DATABASE_URL` is the pooled endpoint (host contains `-pooler`) and serves the app and worker. `DATABASE_URL_UNPOOLED` is the direct endpoint and serves `pnpm db:migrate`. The pooler runs in transaction mode, so nothing in the app relies on session state; every multi-statement unit of work is an explicit transaction on one checked-out client (`Db.transaction`).
+- **Migrations are files.** `db/migrations/NNNN_name.sql`, applied in order by `scripts/migrate.ts` (`pnpm db:migrate`), recorded with a checksum in `schema_migration`. An applied file whose checksum changed fails the run — add a new file instead. `GET /api/readyz` reports pending migrations.
 - **Types.** Money is `INTEGER` paise. Calendar dates are `DATE` and come back as `YYYY-MM-DD` strings. Timestamps are `TIMESTAMPTZ` and come back as ISO strings. JSON documents (`proposal`, `rule_result`, audit `details`) are `JSONB` and come back parsed. `seq BIGSERIAL` columns preserve insertion order where the domain depends on it (consent history, audit order, job claim order).
 - **Concurrency.** Approval, revision and simulation lock the campaign row with `FOR UPDATE`. The worker claims with `FOR UPDATE SKIP LOCKED`. Both are covered by tests that run the operations concurrently.
 - **Secrets.** Connection strings live only in `.env` (git-ignored) or deployment secrets. Do not paste them into docs, issues, logs or commits. Rotate the role password from the Neon console if one leaks.
@@ -49,9 +51,11 @@ Inside `Db.transaction(async (tx) => ...)` every query must go through `tx`. Usi
 ## Testing
 
 ```bash
-npm test          # unit + integration; needs TEST_DATABASE_URL
-npm run test:e2e  # Playwright against a production build; needs TEST_DATABASE_URL
+pnpm test          # unit + integration; needs TEST_DATABASE_URL
+pnpm test:e2e      # Playwright against a production build; needs TEST_DATABASE_URL
 ```
+
+The e2e web server builds into `.next-e2e` (`NEXT_DIST_DIR`), so running it while `pnpm dev` is serving from `.next` no longer corrupts the dev server.
 
 `tests/helpers.ts` creates one schema per `tempDb()` call (`saathi_test_<random>`), runs the migrations into it, and drops it after the test. Against a local Postgres the suite takes a few seconds; against the Neon `test` branch about two minutes, because the worker tests make a hundred-odd sequential round trips each.
 

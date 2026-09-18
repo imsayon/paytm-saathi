@@ -32,7 +32,7 @@ export async function requireMerchantContext(db: Db): Promise<MerchantContext> {
   );
 
   if (!row) {
-    throw new AppError("UNAVAILABLE", "Demo merchant is not seeded. Run: npm run db:seed");
+    throw new AppError("UNAVAILABLE", "Demo merchant is not seeded. Run: pnpm db:seed");
   }
 
   return {

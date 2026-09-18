@@ -1,5 +1,7 @@
 node_modules/
 .pnpm-store/
+package-lock.json
+yarn.lock
 .npm/
 .venv/
 __pycache__/
@@ -8,6 +10,8 @@ dist/
 build/
 coverage/
 .next/
+.next-e2e/
+next-env.d.ts
 .env
 .env.*
 !.env.example

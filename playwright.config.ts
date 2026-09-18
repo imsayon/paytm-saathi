@@ -26,7 +26,7 @@ export default defineConfig({
   webServer: {
     // A production build, not `next dev`: on-demand compilation makes first
     // interactions unpredictably slow and turns real assertions into flakes.
-    command: `npm run db:migrate && npm run build && npm run start -- --port ${PORT}`,
+    command: `pnpm db:migrate && pnpm build && pnpm exec next start --port ${PORT}`,
     url: `http://127.0.0.1:${PORT}/api/readyz`,
     reuseExistingServer: false,
     timeout: 300_000,
@@ -34,6 +34,8 @@ export default defineConfig({
       DATABASE_URL: databaseUrl,
       DATABASE_URL_UNPOOLED: databaseUrl,
       SAATHI_DEMO_MODE: "true",
+      // Keep the e2e production build out of the dev server's .next directory.
+      NEXT_DIST_DIR: ".next-e2e",
     },
   },
 });

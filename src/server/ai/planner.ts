@@ -111,9 +111,10 @@ async function callModelOnce(input: PlannerInput, apiKey: string): Promise<Propo
   const { default: OpenAI } = await import("openai");
   const client = new OpenAI({ apiKey, maxRetries: 0, timeout: 20_000 });
 
+  // No sampling overrides: the current reasoning models accept only their
+  // default temperature, and structured output constrains the shape anyway.
   const response = await client.chat.completions.create({
     model: config.openAiModel,
-    temperature: 0.4,
     messages: [
       { role: "system", content: SYSTEM_INSTRUCTION },
       {

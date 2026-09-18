@@ -49,7 +49,7 @@ export function loadConfig(): AppConfig {
     },
     demoMode: readBool(process.env.SAATHI_DEMO_MODE, true),
     openAiApiKey: nonEmpty(process.env.OPENAI_API_KEY),
-    openAiModel: process.env.SAATHI_OPENAI_MODEL ?? "gpt-4o-mini",
+    openAiModel: process.env.SAATHI_OPENAI_MODEL ?? "gpt-5-mini",
     maxImportBytes: 2 * 1024 * 1024,
     maxImportRows: 20000,
     policyVersion: "retention-v1",

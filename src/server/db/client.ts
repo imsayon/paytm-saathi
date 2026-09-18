@@ -125,7 +125,7 @@ export function createPool(connectionString: string, options: PoolOptions = {}):
     connectionString,
     max: options.max ?? 8,
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 15_000,
+    connectionTimeoutMillis: 30_000,
     // Neon requires TLS with certificate verification; a URL without sslmode
     // must not silently connect in plaintext.
     ssl: local ? undefined : { rejectUnauthorized: true },

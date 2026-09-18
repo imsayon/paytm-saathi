@@ -19,7 +19,7 @@ export async function GET(request: Request) {
       const status = await migrationsAreCurrent(getDb());
       if (!status.current) {
         return NextResponse.json(
-          { ready: false, reason: "Pending migrations. Run: npm run db:migrate", pending_migrations: status.pending },
+          { ready: false, reason: "Pending migrations. Run: pnpm db:migrate", pending_migrations: status.pending },
           { status: 503 },
         );
       }

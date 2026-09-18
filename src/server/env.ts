@@ -4,14 +4,17 @@ import path from "node:path";
 /**
  * Loads `.env.local` then `.env` from the repository root into process.env,
  * without overriding variables that are already set. Next.js does this on its
- * own; this exists so the migration script, seed script, worker and tests see
- * the same configuration without a dotenv dependency. Values are never logged.
+ * own before any route module runs, so inside Next this is a no-op; it exists
+ * so the migration script, seed script, worker and tests see the same
+ * configuration without a dotenv dependency. Values are never logged.
  */
 export function loadEnvFiles(root: string = process.cwd()): void {
+  if (process.env.NEXT_RUNTIME) return;
   for (const name of [".env.local", ".env"]) {
-    const file = path.join(root, name);
-    if (!fs.existsSync(file)) continue;
-    for (const rawLine of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const file = path.join(/* turbopackIgnore: true */ root, name);
+    if (!fs.existsSync(/* turbopackIgnore: true */ file)) continue;
+    const content = fs.readFileSync(/* turbopackIgnore: true */ file, "utf8");
+    for (const rawLine of content.split(/\r?\n/)) {
       const line = rawLine.trim();
       if (!line || line.startsWith("#")) continue;
       const eq = line.indexOf("=");

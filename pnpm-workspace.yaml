@@ -1,0 +1,4 @@
+# pnpm 12 blocks dependency install scripts unless approved here.
+# esbuild ships its platform binary through a postinstall; tsx needs it.
+allowBuilds:
+  esbuild: true

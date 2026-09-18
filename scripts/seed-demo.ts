@@ -10,7 +10,7 @@ async function main(): Promise<void> {
   const db = getDb();
   const migrations = await migrationsAreCurrent(db);
   if (!migrations.current) {
-    throw new Error(`Pending migrations: ${migrations.pending.join(", ")}. Run: npm run db:migrate`);
+    throw new Error(`Pending migrations: ${migrations.pending.join(", ")}. Run: pnpm db:migrate`);
   }
 
   await seedMerchant(db);

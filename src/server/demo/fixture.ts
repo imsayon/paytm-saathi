@@ -20,7 +20,7 @@ export async function seedMerchant(db: Db): Promise<void> {
 
 export function readFixture(): string {
   if (!fs.existsSync(FIXTURE_PATH)) {
-    throw new Error(`Demo fixture is missing at ${FIXTURE_PATH}. Run: npx tsx scripts/generate-fixture.ts`);
+    throw new Error(`Demo fixture is missing at ${FIXTURE_PATH}. Run: pnpm fixture:generate`);
   }
   return fs.readFileSync(FIXTURE_PATH, "utf8");
 }
