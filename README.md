@@ -1,8 +1,8 @@
 # Paytm Saathi
 
-Paytm Saathi is a bounded merchant-retention workflow for the Paytm Build for India AI Hackathon - Bengaluru Edition. It helps a small merchant find repeat customers who appear to have stopped returning, filter them by consent, propose one measured offer, obtain merchant approval, simulate delivery, and compare campaign results with a holdout group.
+Paytm Saathi is a merchant-retention workflow for the Paytm Build for India AI Hackathon - Bengaluru Edition.
 
-The product source of truth is the private [`imsayon/paytm-saathi-docs`](https://github.com/imsayon/paytm-saathi-docs) repository. It contains the PDF specification, the implementation blueprint, hackathon context, decisions, and the shared Claude/Codex working notes.
+It helps a small merchant identify repeat customers who stopped returning, filter the audience by consent, propose a budgeted offer, obtain merchant approval, simulate delivery, and measure the result against a holdout group.
 
 > **This is a demo build.** The data is synthetic, the merchant session is a development-only stub, and the only delivery provider is a mock. There is no Paytm integration and no real customer is ever contacted.
 
