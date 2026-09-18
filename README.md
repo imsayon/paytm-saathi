@@ -29,7 +29,7 @@ pnpm db:seed              # seeds the demo merchant, imports the fixture, prints
 pnpm dev
 ```
 
-Open http://localhost:3000 and follow the five numbered steps in the header. `GET /api/healthz` confirms the database is reachable; `GET /api/readyz` confirms every migration is applied.
+Open http://127.0.0.1:3000 and follow the five numbered steps in the header. The dev and production servers bind to the loopback address only, so nothing on the venue network can reach the demo controls. `GET /api/healthz` confirms the database is reachable; `GET /api/readyz` confirms every migration is applied.
 
 `pnpm db:seed` is safe to re-run: the import is checksum-idempotent. The import screen also has a **Reset demo data** control that clears the demo merchant's campaigns, jobs and outcomes so the sequence can be rehearsed again on the same database.
 
@@ -65,6 +65,10 @@ The UI has demo controls for delivery and the outcome clock, so a presenter neve
 ### Tests need a test database
 
 Set `TEST_DATABASE_URL` in `.env` to the Neon `test` branch (direct endpoint) or a local Postgres such as `postgresql://localhost:5432/saathi_test`. Unit and integration tests create an isolated schema per test and drop it afterwards; the e2e run resets the demo merchant's data on that database. The e2e suite refuses to start without `TEST_DATABASE_URL`, so it can never wipe the production branch by accident. A local Postgres runs the whole suite in a few seconds; the Neon branch takes about two minutes because every query crosses the network.
+
+## Interface
+
+Five screens, one per step, rendered client-side from the same API the tests use. The motion layer ([anime.js](https://animejs.com) 4) staggers cards into view, counts the headline numbers up, grows the campaign-versus-holdout bars, lights the workflow strip stage by stage, and pops delivery jobs into their final status; it steps aside under `prefers-reduced-motion`. A light/dark toggle in the header is remembered per browser and defaults to light so a projector never gets a dark screen by surprise. Layouts collapse to one column on phones and tables scroll inside their cards.
 
 ## Who owns what
 
