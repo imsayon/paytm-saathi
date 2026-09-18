@@ -1,12 +1,12 @@
-# Metron engineering instructions
+# Paytm Saathi engineering instructions
 
-Metron is an evidence-first material-identity project. Read the canonical documents in `imsayon/metron-docs` before making product or architecture changes, especially the SIH26099 problem statement, research brainstorm, product scope, architecture, and open decisions.
+Read the canonical blueprint in `imsayon/paytm-saathi-docs` before changing product scope or architecture. The PDF specification is the primary product source; the HackBriven page supplies event facts only.
 
-Keep exact identity, near-duplicate review, and functional equivalence as separate concepts. Do not turn a similarity score into an engineering approval. Preserve source-system identifiers and provenance. Treat missing attributes as unknown, not as agreement.
+Keep the product focused on one merchant-retention workflow: signal, plan, review, approval, mock delivery, and outcome measurement. Do not turn it into a generic CRM, chatbot, autonomous-agent platform, payment system, or live Paytm integration.
 
-Keep model-generated extraction or explanations separate from deterministic conflict rules, evidence checks, mappings, and approvals. Do not add live SAP/ERP writes, procurement execution, autonomous approvals, or a new classification standard without an explicit decision recorded in the docs repository.
+Rules own eligibility, consent, budget, arithmetic, authorization, campaign state, delivery state, and metrics. The model drafts and explains. No provider call may occur before merchant approval. Preserve versioning, idempotency, consent rechecks, provider status checks, and audit events.
 
-Inspect status before editing, preserve unrelated work, and validate the actual final state. Do not commit secrets, raw confidential CPSE data, or claims that have not been verified.
+Claude and Codex are working together through the shared docs repository. Do not treat them as separate product owners. Either side may challenge or improve a decision; record meaningful decisions and unresolved questions in the docs repository so both sides can continue from the same context.
 
-Claude and Codex are working together through a human-reviewed handoff. Claude owns research/product review in the working agreement; Codex owns implementation, tests, and local verification in this repository.
+Inspect status before editing, preserve unrelated work, validate the actual final state, and do not commit secrets or real customer data.
 

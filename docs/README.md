@@ -1,12 +1,13 @@
-# Metron implementation documents
+# Implementation documents
 
-This folder contains documents that help the implementation team work against the canonical research and product decisions.
+The full product and engineering blueprint lives in the private [`imsayon/paytm-saathi-docs`](https://github.com/imsayon/paytm-saathi-docs) repository.
 
-The source of truth for research, scope, architecture decisions, evaluation, and governance is the private [`imsayon/metron-docs`](https://github.com/imsayon/metron-docs) repository. Keep implementation-specific notes here only when they belong with code and link back to the canonical document.
+This folder is for implementation-facing notes that belong near the code. Keep major product, architecture, safety, and scope decisions in the docs repository so Claude and Codex can read and update the same written context.
 
-## Current documents
+## Start here
 
-- [`DEVELOPMENT.md`](DEVELOPMENT.md): repository workflow and current initialization state.
-
-The runtime architecture has not been selected yet. The first implementation must follow the decision records in `metron-docs`, rather than silently assuming a vector database, taxonomy, LLM, or SAP integration.
+1. Read the canonical `docs/Paytm-Saathi-Implementation-Blueprint.md` in `paytm-saathi-docs`.
+2. Check the open decisions and accepted changes recorded there.
+3. Implement the next P0 task without widening the scope.
+4. Update the docs repository when implementation evidence changes a decision.
 

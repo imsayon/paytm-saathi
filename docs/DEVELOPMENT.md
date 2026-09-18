@@ -1,22 +1,28 @@
 # Development handoff
 
-## Before implementation
+## First vertical slice
 
-1. Read `metron-docs/docs/product/PRODUCT-SCOPE.md`.
-2. Read `metron-docs/docs/architecture/ARCHITECTURE.md`.
-3. Read `metron-docs/docs/product/OPEN-DECISIONS.md`.
-4. Confirm the source-data contract and evaluation labels.
-5. Record any changed decision in the docs repository before building against it.
+Build the smallest complete workflow:
 
-## Evidence and claims
+1. Load the deterministic synthetic CSV.
+2. Show the repeat-customer retention signal and consent exclusions.
+3. Generate a bounded AI or template proposal.
+4. Validate the offer and budget with deterministic rules.
+5. Let the merchant edit and approve one immutable version.
+6. Persist idempotent mock delivery jobs.
+7. Simulate the seven-day outcome window.
+8. Report campaign versus holdout return behavior.
 
-Every matcher result must preserve source records, extracted attributes, conflicts, missing evidence, and the rule/model path that produced the recommendation. Scores are scores unless calibrated against representative labels. Synthetic data can validate behavior and failure handling; it cannot establish industrial accuracy or procurement savings.
+## Shared context
 
-## Collaboration
+Claude and Codex use `paytm-saathi-docs` as shared working memory and a written conversation. Neither side is restricted to a permanent role. Research, architecture, implementation, review, and corrections can move in either direction; record material changes there.
 
-Claude and Codex work from the same documented decisions. Claude reviews research, scope, and architecture. Codex implements the repository, runs tests, and verifies the local product. Human review remains required for material identity, functional equivalence, common-code approval, and any external integration.
+## Non-negotiable checks
 
-## Current initialization state
-
-The repository is initialized for implementation but contains no production matcher yet. The first code milestone is a reproducible fixture and data contract, followed by category-aware normalization and candidate retrieval.
+- No provider call before approval.
+- Consent is checked during cohort construction and immediately before delivery.
+- Changed plans invalidate approval.
+- Provider timeouts check status before retrying.
+- Every state transition writes an audit event.
+- Synthetic results are labelled synthetic and descriptive.
 

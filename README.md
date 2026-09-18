@@ -1,44 +1,40 @@
-# Metron
+# Paytm Saathi
 
-Metron is an AI-assisted material-identity and data-governance platform for SIH26099: the National Unified Material Master problem. It is intended to help participating CPSEs discover duplicate and near-duplicate material records, preserve source-system mappings, surface evidence, and route uncertain decisions to material specialists.
+Paytm Saathi is a bounded merchant-retention workflow for the Paytm Build for India AI Hackathon - Bengaluru Edition. It helps a small merchant find repeat customers who appear to have stopped returning, filter them by consent, propose one measured offer, obtain merchant approval, simulate delivery, and compare campaign results with a holdout group.
 
-This repository is the implementation end. The canonical product, research, architecture, and governance documents live in the private [`imsayon/metron-docs`](https://github.com/imsayon/metron-docs) repository.
+The product source of truth is the private [`imsayon/paytm-saathi-docs`](https://github.com/imsayon/paytm-saathi-docs) repository. It contains the PDF specification, the implementation blueprint, hackathon context, decisions, and the shared Claude/Codex working notes.
 
 ## Claude and Codex working together
 
-Claude and Codex are working together on Metron through a human-orchestrated handoff:
+Claude and Codex are working together on the same product. We are not dividing the product into separate ownership silos. We use `paytm-saathi-docs` as shared working memory and a written conversation: either side can add research, challenge a decision, improve the plan, propose implementation changes, or review the result. The human project owner remains the final decision-maker.
 
-- Claude end: research synthesis, product framing, architecture critique, and document review.
-- Codex end: repository initialization, implementation, tests, local verification, and release hygiene.
-
-This README is written from the Codex end. The division describes responsibility; it does not imply an automated connection between the two model sessions.
+This is the Codex end of that collaboration: the place where repository changes, implementation, tests, and local verification happen. “Codex end” does not mean a separate product direction or a permanent role boundary.
 
 ## Current status
 
-The repository has been initialized with the project boundary and developer handoff documents. Product implementation has not been claimed yet. The next engineering step is to agree on the identity semantics, initial material categories, source data contract, and evaluation labels before building a matcher.
+The repository has been corrected and initialized for Paytm Saathi. The current milestone is the P0 demo vertical slice; the runtime implementation still needs to be built from the documented blueprint.
+
+## Product boundary
+
+The MVP is:
+
+`CSV import -> retention signal -> deterministic eligible cohort -> bounded AI copy draft -> merchant review/edit -> approval -> persisted mock delivery -> seven-day holdout report`
+
+Rules own eligibility, consent, budget, arithmetic, campaign state, authorization, and delivery state. The model drafts and explains. No provider call exists before merchant approval.
+
+The MVP excludes live Paytm integration, real customer outreach, autonomous transfers, lending/insurance decisions, inventory/profit inference, generic CRM, and unrestricted agent behavior.
 
 ## Repository map
 
-- [`docs/`](docs/README.md): implementation-facing notes and links to canonical documentation.
-- [`AGENTS.md`](AGENTS.md): working rules for future engineering agents.
-- [`metron-docs`](https://github.com/imsayon/metron-docs): research and product source of truth.
-
-## Problem boundary
-
-Metron must distinguish, with evidence:
-
-1. Exact or duplicate material identity.
-2. Near-duplicate records that need review.
-3. Functionally equivalent or conditionally substitutable materials.
-4. Records that cannot be safely compared because required attributes are missing.
-
-Text similarity is a candidate-discovery signal. It is not, by itself, proof of identity or interchangeability. The system must preserve source records, show conflicting and missing attributes, support human approval, and never invent a golden specification by combining unsupported values.
+- [`docs/`](docs/README.md): implementation-facing notes.
+- [`AGENTS.md`](AGENTS.md): project instructions for future agents.
+- [`paytm-saathi-docs`](https://github.com/imsayon/paytm-saathi-docs): canonical product and research documents.
 
 ## Source status
 
-The SIH26099 problem statement and the research notes are copied into `metron-docs` with provenance. Dataset availability, sponsor labels, common-code semantics, classification standard, and live SAP/ERP access remain open questions.
+The PDF and event page define the product and hackathon context. The event page does not publish Paytm APIs, technology requirements, a judging rubric, or authorization for real customer messaging. Those items remain unverified and are not assumed here.
 
 ## License
 
-No license has been selected yet. Do not assume that this repository may be reused or redistributed until the project owner adds one.
+No license has been selected yet. Do not assume this repository may be reused or redistributed until the project owner adds one.
 
