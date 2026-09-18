@@ -39,10 +39,10 @@ test("the full demo path runs from import to holdout report", async ({ page }) =
   await expect(page.getByRole("button", { name: /^Approve version/ })).toBeDisabled();
 
   // 6. Revise to a cap-safe offer with matching copy.
-  await page.locator("#reward").fill("15");
-  await page
-    .locator("#body")
-    .fill("It has been a while. Come by on a weekday this week and enjoy ₹15 off your order.");
+  await expect(page.getByRole("heading", { name: "Compare affordable offers" })).toBeVisible();
+  await page.getByRole("button", { name: "Use ₹15.00 offer", exact: true }).click();
+  await expect(page.getByText("Get ₹15.00 off one order on a weekday. Valid for 7 days.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Approve version/ })).toBeDisabled();
   await page.getByRole("button", { name: "Save as version 2" }).click();
 
   await expect(page.getByText("All deterministic checks pass.")).toBeVisible();
@@ -132,4 +132,31 @@ test("the outcome simulation stays idempotent when re-run", async ({ page }) => 
   await page.getByRole("button", { name: "Re-run seven-day simulation" }).click();
   await expect(page.locator(".card", { hasText: "Campaign return rate" }).locator(".stat")).toHaveText("60%");
   await expect(page.locator(".card", { hasText: "Holdout return rate" }).locator(".stat")).toHaveText("20%");
+});
+
+test("initial API failures are visible and every screen can retry", async ({ page, request }) => {
+  const overview=await (await request.get('/api/overview')).json();
+  const id=overview.campaigns[0].id;
+  for(const [path,endpoint] of [['/','/api/overview'],['/signals','/api/overview'],[`/campaigns/${id}/review`,`/api/campaigns/${id}`],[`/campaigns/${id}/status`,`/api/campaigns/${id}`],[`/campaigns/${id}/outcome`,`/api/campaigns/${id}/outcome`]]) {
+    const pattern=`**${endpoint}`;
+    await page.route(pattern,route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{message:'Temporary test outage'}})}));
+    await page.goto(path!);
+    await expect(page.getByRole('alert').filter({hasText:'Temporary test outage'})).toContainText('Temporary test outage');
+    await page.unroute(pattern);
+    await page.getByRole('button',{name:'Retry loading'}).click();
+    await expect(page.getByRole('button',{name:'Retry loading'})).toHaveCount(0);
+    await expect(page.locator('h1')).toBeVisible();
+  }
+});
+
+test("invalid API bodies fail closed with useful client errors", async ({ request }) => {
+  const overview=await (await request.get('/api/overview')).json();
+  const id=overview.campaigns[0].id;
+  for(const [path,data] of [['/api/imports',{use_fixture:'true'}],['/api/campaigns/preview',{intent:4}],[`/api/campaigns/${id}/revise`,{copy:{body:42}}],[`/api/campaigns/${id}/revise`,{weekday_only:'false'}]]) {
+    const response=await request.post(path as string,{data});
+    expect(response.status()).toBe(400);
+    expect((await response.json()).error.code).toBe('BAD_REQUEST');
+  }
+  const wrongType=await request.post('/api/campaigns/preview',{headers:{'content-type':'text/plain'},data:'{"intent":"hello"}'});
+  expect(wrongType.status()).toBe(400);
 });

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { NextResponse } from "next/server";
 import { buildPlannerInput, runPlanner } from "@/server/ai/planner";
 import { requireMerchantContext } from "@/server/auth/context";
@@ -12,11 +13,11 @@ import { handle, rateLimit, readJson } from "@/server/http";
 
 export const dynamic = "force-dynamic";
 
-type PreviewBody = {
-  intent?: string;
-  budget_cap_minor?: number;
-  as_of?: string;
-};
+const previewSchema = z.object({
+  intent: z.string().trim().min(5).max(500),
+  budget_cap_minor: z.number().int().positive().max(2_147_483_647).optional(),
+  as_of: z.string().refine(isValidDateString, "Use a valid YYYY-MM-DD date").optional(),
+}).strict();
 
 export async function POST(request: Request) {
   return handle(request, async ({ requestId }) => {
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
     const ctx = await requireMerchantContext(db);
     rateLimit(`preview:${ctx.merchantId}`, 20, 60_000);
 
-    const body = await readJson<PreviewBody>(request);
+    const body = await readJson(request, previewSchema);
     const intent = (body.intent ?? "").trim();
     const budgetCapMinor = body.budget_cap_minor ?? DEMO_BUDGET_CAP_MINOR;
     const asOf = body.as_of ?? DEMO_AS_OF;

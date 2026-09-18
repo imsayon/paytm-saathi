@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import type { CampaignDetail, MeasurementReport } from "@/components/types";
-import { apiCall, AuditTimeline, DemoBanner, ErrorBanner, KeyValue, percent, rupees, Stat, StatusPill, Steps } from "@/components/ui";
+import { InitialLoad, apiCall, AuditTimeline, DemoBanner, ErrorBanner, KeyValue, percent, rupees, Stat, StatusPill, Steps } from "@/components/ui";
 
 type OutcomeResponse = {
   campaign: CampaignDetail["campaign"];
@@ -38,6 +38,7 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       setData(await apiCall<OutcomeResponse>(`/api/campaigns/${id}/outcome`));
     } catch (caught) {
@@ -62,13 +63,7 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
     }
   }
 
-  if (!data) {
-    return (
-      <div className="card">
-        <div className="skeleton" style={{ width: "50%" }} />
-      </div>
-    );
-  }
+  if (!data) return <InitialLoad error={error} retry={() => void load()} />;
 
   const report = data.report;
 
@@ -83,8 +78,8 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
         <span className="pill neutral">version {data.version.version}</span>
       </div>
       <p className="lede">
-        Returns alone would overstate the offer. The holdout shows how many of these customers would have come back
-        anyway, so the difference between the two groups is the only number worth acting on.
+        Compare campaign returns with an untouched holdout. These synthetic results demonstrate the calculation;
+        they do not establish how many real customers an offer would bring back.
       </p>
 
       <div className="card">

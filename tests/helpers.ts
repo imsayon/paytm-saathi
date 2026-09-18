@@ -20,10 +20,10 @@ export const AS_OF = "2026-09-01";
  * so tests are isolated and never touch demo data in `public`.
  */
 export function testDatabaseUrl(): string {
-  const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
+  const url = process.env.TEST_DATABASE_URL;
   if (!url) {
     throw new Error(
-      "No test database configured. Set TEST_DATABASE_URL (recommended: the Neon `test` branch or a local Postgres) or DATABASE_URL.",
+      "No test database configured. Set TEST_DATABASE_URL (recommended: the Neon `test` branch or a local Postgres).",
     );
   }
   return url;

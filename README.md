@@ -9,7 +9,7 @@ It helps a small merchant identify repeat customers who stopped returning, filte
 ## The one loop this product does
 
 ```
-CSV import -> retention signal -> deterministic eligible cohort -> bounded AI copy draft
+CSV import -> retention signal -> deterministic eligible cohort -> bounded Gemini copy draft + affordable offer comparison
   -> merchant review/edit -> approval -> persisted mock delivery -> seven-day holdout report
 ```
 
@@ -37,10 +37,14 @@ Optional, for the model-backed planner:
 
 ```bash
 # in .env
-OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=your-private-key
 ```
 
 Without a key the planner uses a deterministic template and labels every proposal `template fallback`, in the UI and in the audit trail. The demo runs end to end with no model key.
+
+The core app, worker, scripts and tests are TypeScript. Gemini uses the installed OpenAI SDK against Google's compatibility endpoint; requests do not go to OpenAI. The default verified model is `gemini-2.5-flash`; override it with `SAATHI_GEMINI_MODEL`.
+
+Run `pnpm ai:check` to verify a real structured model response using synthetic aggregates only. It fails if the planner falls back. Browser tests deliberately disable the key for reproducible assertions. Google model availability and quota are external dependencies.
 
 ### Commands
 
@@ -52,6 +56,7 @@ Without a key the planner uses a deterministic template and labels every proposa
 | `pnpm worker` | Run the delivery worker as its own process |
 | `pnpm test` | Unit and integration tests against a real Postgres (see below) |
 | `pnpm test:e2e` | Playwright smoke test of the whole demo path on a production build |
+| `pnpm ai:check` | Verify live Gemini drafting without database writes or customer contact |
 | `pnpm typecheck` | TypeScript, no emit |
 | `pnpm fixture:generate` | Regenerate the committed fixture CSV |
 
@@ -107,11 +112,31 @@ Postgres does three jobs here and nothing more. Approval takes a row lock on the
 - **Import** is idempotent on `(merchant_id, checksum)` and validates the entire file before publishing any row.
 - **Approval** requires an `Idempotency-Key`. The same key replays the original approval; a different key against an approved version is a `409`; a stale version is a `409`.
 - **Jobs** are unique per `(version_id, recipient_id)` and carry a stable provider idempotency key.
-- **The worker** claims jobs with an atomic locked update and a lease. Two workers draining at once never process the same job; an expired lease is reclaimed after a crash. An attempt, its job status and its audit event commit in one transaction.
-- **Consent and version are re-checked immediately before every provider call.** A revoked consent cancels the job without contacting the provider.
+- **The worker** claims jobs with an atomic locked update and a lease. Two workers draining at once never process the same job; an expired lease is reclaimed after a crash and provider status is checked even if no attempt was recorded. If the mock has no status evidence, recovery stops in `NEEDS_REVIEW`. An attempt, its job status and its audit event commit in one transaction.
+- **Consent and version are checked before processing each job.** A revoked consent cancels the job without contacting the provider.
 - **A timeout never triggers a blind retry.** The worker asks the provider for status using the same idempotency key and re-sends only when status proves nothing was delivered. An unresolvable status becomes `NEEDS_REVIEW` and stops.
 - **Outcome simulation** is idempotent on `(campaign_id, customer_id, window_start)`.
 - Every material transition writes an audit event inside the same transaction as the state change.
+
+## Compare affordable offers
+
+On the review screen, choose among up to three rewards at 50%, 75% and 100% of the cap-safe maximum, floor-rounded to whole paise and bounded by the existing ₹1–₹100 reward policy. At least two eligible customers are needed for campaign and holdout groups.
+
+For 20 eligible people and a ₹300 cap:
+
+| Reward | Conservative whole-cohort exposure | Maximum for 10 contacted customers |
+|---|---:|---:|
+| ₹7.50 | ₹150 | ₹75 |
+| ₹11.25 | ₹225 | ₹112.50 |
+| ₹15.00 | ₹300 | ₹150 |
+
+The cap still uses the conservative whole cohort for compatibility. The holdout gets no offer. These are cost comparisons, not predictions of conversion or profit. Gemini may explain the tradeoff; its text is advisory. A conservative wording filter falls back to a labelled rule-based explanation when it detects quantitative/performance claims; it is not a semantic guarantee.
+
+Choosing an option only prepares edits. Save a new version, review the wording and generated offer sentence, then approve. New drafts separate the editable introduction from exact reward/validity terms. The worker appends those terms from the approved offer; amounts in the introduction are blocked. Legacy proposals remain readable and retain their mismatch checks. Merchant review is still required for freeform language.
+
+Campaign detail responses add `offer_options` (reward, group sizes, conservative and campaign exposures in paise) and `reward_promise`. Versioned proposal JSON stores optional copy/explanation source metadata; no migration is required. Revision accepts `copy_format: "separate_reward"`; request fields are type-checked and unknown fields rejected.
+
+The cohort contains absent regulars, not exclusively weekday regulars. A weekday-only offer limits redemption timing; it does not change audience membership.
 
 ## Measurement, stated honestly
 
@@ -167,6 +192,20 @@ No live Paytm integration or credentials. No real SMS, WhatsApp, email or custom
 - The outcome window is simulated, not observed.
 - The mock provider's behaviour is deterministic demo scaffolding, including one scripted timeout and one scripted failure so the reliability paths are visible during a demo.
 - Event submission constraints beyond what the HackBriven page publishes are not verifiable from the available source.
+
+## Local rehearsal
+
+1. Set the three database URLs and optional Gemini key in ignored `.env`.
+2. Run `pnpm install --frozen-lockfile`, `pnpm exec playwright install chromium`, `pnpm db:migrate`, `pnpm db:seed`, then `pnpm dev`.
+3. The dev server binds to `127.0.0.1:3000`. Check health/readiness, load the CSV, inspect the audience and draft a campaign.
+4. Compare offers, select ₹15, review generated terms, save and approve the new version.
+5. Run mock delivery, then advance the simulated window. Pending delivery blocks simulation.
+6. For the fixed ₹15 scenario, expect 10 jobs, 9 deliveries, 1 failure; 60% versus 20%; ₹90 reward cost and ₹630 contribution proxy.
+7. Rehearse again after resetting the **disposable demo database**. Do not reset a shared presenting database without coordinating with its users.
+
+Run `pnpm typecheck`, `pnpm test`, `pnpm build` and `pnpm test:e2e` for essential checks. Tests require an explicit `TEST_DATABASE_URL`; browser tests reset that database's demo merchant. Do not run them alongside a demo using the same database. The SDK's inherited event-day version has an exact-version pnpm release-age exception; all other versions retain the age policy.
+
+Additional limits: the CSV reader is line-oriented and does not support quoted multiline fields; imported payment conflicts are ignored, not reconciled as real refunds; demo consent comes from the first CSV row per customer. The mock executes manually rather than scheduling sends within proposed windows. These are pilot prerequisites, not production capabilities.
 
 ## License
 

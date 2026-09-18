@@ -46,6 +46,13 @@ export async function runOutcomeSimulation(db: Db, ctx: MerchantContext, campaig
     }
 
     const version = await loadVersion(tx, campaign.id, campaign.current_version);
+    const pending = await tx.one<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM delivery_job WHERE version_id = $1 AND status IN ('QUEUED', 'PROCESSING', 'UNKNOWN')`,
+      [version.id],
+    );
+    if (pending && pending.n > 0) {
+      throw new AppError("RULE_VIOLATION", "Finish mock delivery before advancing the outcome window.");
+    }
     const recipients = await listRecipients(tx, version.id);
     if (recipients.length === 0) {
       throw new AppError("RULE_VIOLATION", "This version has no recipients to measure.");
@@ -84,7 +91,7 @@ export async function runOutcomeSimulation(db: Db, ctx: MerchantContext, campaig
     const campaignGroup = recipients.filter((recipient) => recipient.assignment_group === "campaign");
     const holdoutGroup = recipients.filter((recipient) => recipient.assignment_group === "holdout");
 
-    // Only a customer who actually received the message can respond to it.
+    // Scripted demo only: real customers can return without receiving an offer.
     const reachable = orderByOutcomeHash(
       campaign.id,
       campaignGroup.filter((recipient) => deliveredCustomerIds.has(recipient.customer_id)),

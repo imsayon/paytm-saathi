@@ -34,6 +34,8 @@ export default defineConfig({
       DATABASE_URL: databaseUrl,
       DATABASE_URL_UNPOOLED: databaseUrl,
       SAATHI_DEMO_MODE: "true",
+      GEMINI_API_KEY: "",
+      OPENAI_API_KEY: "",
       // Keep the e2e production build out of the dev server's .next directory.
       NEXT_DIST_DIR: ".next-e2e",
     },

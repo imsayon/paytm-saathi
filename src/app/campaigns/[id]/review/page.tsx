@@ -2,8 +2,9 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { COMPARISON_EXPLANATION, rewardPromise } from "@/server/domain/rules";
 import type { CampaignDetail } from "@/components/types";
-import { apiCall, AuditTimeline, DemoBanner, ErrorBanner, KeyValue, rupees, StatusPill, Steps } from "@/components/ui";
+import { InitialLoad, apiCall, AuditTimeline, DemoBanner, ErrorBanner, KeyValue, rupees, StatusPill, Steps } from "@/components/ui";
 
 export default function ReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -13,6 +14,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   const [error, setError] = useState<{ message: string; details?: unknown } | null>(null);
   const [busy, setBusy] = useState<"revise" | "approve" | null>(null);
 
+  const [separateReward, setSeparateReward] = useState(false);
   const [rewardRupees, setRewardRupees] = useState("");
   const [headline, setHeadline] = useState("");
   const [body, setBody] = useState("");
@@ -20,6 +22,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
 
   const applyDetail = useCallback((data: CampaignDetail) => {
     setDetail(data);
+    setSeparateReward(data.proposal.copy_format === "separate_reward");
     setRewardRupees(String(data.proposal.offer.amount_minor / 100));
     setHeadline(data.proposal.copy.headline);
     setBody(data.proposal.copy.body);
@@ -27,6 +30,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   }, []);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       applyDetail(await apiCall<CampaignDetail>(`/api/campaigns/${id}`));
     } catch (caught) {
@@ -45,6 +49,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
       const data = await apiCall<CampaignDetail>(`/api/campaigns/${id}/revise`, {
         method: "POST",
         body: JSON.stringify({
+          ...(separateReward ? { copy_format: "separate_reward" } : {}),
           reward_minor: Math.round(Number(rewardRupees) * 100),
           copy: { headline, body, cta },
         }),
@@ -74,22 +79,15 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
     }
   }
 
-  if (!detail) {
-    return (
-      <div className="card">
-        <div className="skeleton" style={{ width: "45%", marginBottom: 10 }} />
-        <div className="skeleton" style={{ width: "80%", marginBottom: 10 }} />
-        <div className="skeleton" style={{ width: "60%" }} />
-      </div>
-    );
-  }
+  if (!detail) return <InitialLoad error={error} retry={() => void load()} />;
 
   const rules = detail.rule_result;
   const dirty =
     Math.round(Number(rewardRupees) * 100) !== detail.proposal.offer.amount_minor ||
     headline !== detail.proposal.copy.headline ||
     body !== detail.proposal.copy.body ||
-    cta !== detail.proposal.copy.cta;
+    cta !== detail.proposal.copy.cta ||
+    separateReward !== (detail.proposal.copy_format === "separate_reward");
   const approved = detail.approval !== null;
 
   return (
@@ -129,14 +127,14 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
       <div className="grid two" style={{ marginTop: 16 }}>
         <div className="card">
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
-            <h2 style={{ margin: 0 }}>AI draft</h2>
+            <h2 style={{ margin: 0 }}>Campaign draft</h2>
             <span className="pill info">
-              {detail.version.ai_source === "model" ? "model" : "template fallback"}
+              {detail.proposal.copy_source === "merchant" ? "merchant edited" : detail.version.ai_source === "model" ? "model" : "template fallback"}
             </span>
           </div>
           <p className="tiny muted" style={{ marginTop: 0 }}>
-            The model wrote the wording and the rationale. It received only aggregate cohort counts — no customer
-            identifiers and no contact references — and it cannot choose recipients, change consent, or change the cap.
+            {detail.version.ai_source === "model" ? "The original draft used Gemini and aggregate cohort facts only." : "The original draft used a deterministic template; no model generated it."}{" "}
+            Merchant edits are saved separately. Rules choose recipients and enforce consent and the cap.
           </p>
 
           <h3 style={{ marginTop: 16 }}>Audience label</h3>
@@ -172,10 +170,11 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
           <KeyValue label="Holdout group" value={String(rules.holdout_group_size)} hint="receives nothing" />
           <KeyValue label="Reward per customer" value={rupees(rules.reward_minor)} />
           <KeyValue
-            label="Estimated exposure"
+            label="Conservative cohort exposure"
             value={rupees(rules.estimated_cost_minor)}
             hint={`${rules.audience_count} × ${rupees(rules.reward_minor)}`}
           />
+          <KeyValue label="Campaign maximum exposure" value={rupees(rules.campaign_group_size * rules.reward_minor)} hint="Only the campaign group can receive a reward" />
           <KeyValue label="Budget cap" value={rupees(rules.budget_cap_minor)} />
           <KeyValue label="Policy" value={detail.version.policy_version} />
 
@@ -189,6 +188,31 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
             </div>
           ) : null}
         </div>
+      </div>
+
+      <div className="card">
+        <h2>Compare affordable offers</h2>
+        <p className="tiny muted">Same audience and holdout, different reward sizes. The cap conservatively covers the whole eligible cohort; the holdout receives no offer.</p>
+        <p>{detail.proposal.comparison_explanation ?? COMPARISON_EXPLANATION}</p>
+        <span className="pill neutral">{detail.proposal.comparison_source === "model" ? "AI explanation · advisory" : "Rule-based explanation"}</span>
+        <p className="tiny muted">No option predicts return rate, profit or ROI. Counts and costs below are calculated by rules.</p>
+        {detail.offer_options.length === 0 ? <p>No reward fits the current budget and minimum cohort. Increase the budget or import an eligible audience.</p> : (
+          <div className="scroll"><table>
+            <thead><tr><th>Reward</th><th>Campaign / holdout</th><th>Conservative exposure</th><th>Campaign maximum</th><th>Action</th></tr></thead>
+            <tbody>{detail.offer_options.map((option) => <tr key={option.reward_minor}>
+              <td>{rupees(option.reward_minor)}</td><td>{option.campaign_group_size} / {option.holdout_group_size}</td>
+              <td>{rupees(option.conservative_exposure_minor)}</td><td>{rupees(option.campaign_exposure_minor)}</td>
+              <td><button className="secondary" disabled={busy !== null || approved} onClick={() => {
+                setRewardRupees(String(option.reward_minor / 100));
+                if (!separateReward) {
+                  setHeadline("A welcome back reward"); setBody("We would love to welcome you back."); setCta("Visit us");
+                }
+                setSeparateReward(true);
+              }}>Use {rupees(option.reward_minor)} offer</button></td>
+            </tr>)}</tbody>
+          </table></div>
+        )}
+        <p className="tiny muted">Choosing prepares edits only. Save the next version, review it, then approve.</p>
       </div>
 
       <div className="card">
@@ -227,11 +251,13 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
               />
             </div>
             <div className="field">
-              <label htmlFor="body">Message body</label>
+              <label htmlFor="body">{separateReward ? "Message introduction" : "Message body"}</label>
               <textarea id="body" value={body} onChange={(event) => setBody(event.target.value)} disabled={approved} />
             </div>
           </div>
         </div>
+
+        {separateReward ? <div className="banner info"><strong>Generated offer terms</strong><p>{Number.isFinite(Number(rewardRupees)) ? rewardPromise({ ...detail.proposal.offer, kind: "fixed_reward", amount_minor: Math.round(Number(rewardRupees) * 100) }) : "Enter a valid reward."}</p><span className="tiny">These terms are appended to the introduction. Keep amounts out of editable copy.</span></div> : null}
 
         <div className="actions" style={{ marginTop: 14 }}>
           <button className="secondary" onClick={revise} disabled={busy !== null || !dirty || approved}>

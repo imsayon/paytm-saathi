@@ -322,3 +322,24 @@ test("planner output that breaks the schema is rejected before it reaches the ru
   });
   assert.equal(parsed.success, false, "an offer type outside policy must not parse");
 });
+
+test("computed comparisons are read-only; choosing a reward requires a fresh approved version", async () => {
+  const { buildCampaignDetail } = await import('../../src/server/domain/views');
+  const { db, ctx } = await setup();
+  const { campaignId } = await previewOf(db,ctx,2500);
+  const detail=await buildCampaignDetail(db,ctx,campaignId);
+  assert.deepEqual(detail.offer_options.map(o=>o.reward_minor),[750,1125,1500]);
+  assert.equal(await count(db,`SELECT COUNT(*)::int AS n FROM delivery_job`),0);
+  const selected=detail.offer_options[2]!;
+  await reviseCampaign(db,ctx,{campaignId,budgetCapMinor:30000,proposal:proposalOf({copy_format:'separate_reward',offer:{kind:'fixed_reward',amount_minor:selected.reward_minor,valid_days:7,weekday_only:true}})});
+  assert.equal(await count(db,`SELECT COUNT(*)::int AS n FROM delivery_job`),0);
+  await assert.rejects(approveCampaign(db,ctx,{campaignId,version:1,idempotencyKey:'old-comparison'}),isCode('STALE_VERSION'));
+  await approveCampaign(db,ctx,{campaignId,version:2,idempotencyKey:'selected-comparison'});
+  const final=await buildCampaignDetail(db,ctx,campaignId);
+  assert.equal(final.jobs.length,10);
+  assert.match(final.reward_promise,/₹15.00/);
+  const { drainQueue } = await import('../../src/server/worker/runner');
+  let sent=0;
+  await drainQueue(db,{provider:{name:'capture',async send(message){sent++;assert.ok(message.body.endsWith(final.reward_promise));return {outcome:'delivered',providerMessageId:'captured',raw:'ok'};},async getStatus(){return {state:'unavailable',raw:'unknown'};}}});
+  assert.equal(sent,10);
+});

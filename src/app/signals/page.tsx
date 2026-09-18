@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiCall, DemoBanner, ErrorBanner, rupees, Stat, Steps } from "@/components/ui";
+import { InitialLoad, apiCall, DemoBanner, ErrorBanner, rupees, Stat, Steps } from "@/components/ui";
 
 type CustomerView = {
   customer_ref: string;
@@ -46,6 +46,7 @@ export default function SignalsPage() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const data = await apiCall<Overview>("/api/overview");
       setOverview(data);
@@ -76,13 +77,7 @@ export default function SignalsPage() {
     }
   }
 
-  if (!overview) {
-    return (
-      <div className="card">
-        <div className="skeleton" style={{ width: "50%" }} />
-      </div>
-    );
-  }
+  if (!overview) return <InitialLoad error={error} retry={() => void load()} />;
 
   const signal = overview.signal;
   if (!signal) {
@@ -143,8 +138,7 @@ export default function SignalsPage() {
             <span className="pill neutral">Holdout {eligible.length - campaignSize}</span>
           </div>
           <p className="tiny muted">
-            The holdout receives nothing at all — no message and no delivery job. Without it there is no way to tell a
-            returning customer from a customer the offer actually brought back.
+            The holdout receives nothing at all — no message and no delivery job. It supplies a comparison baseline; this small synthetic cohort cannot establish causal impact.
           </p>
           <div className="field" style={{ marginTop: 14 }}>
             <label htmlFor="intent">Merchant intent</label>

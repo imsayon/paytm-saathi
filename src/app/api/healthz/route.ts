@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   return handle(request, async () => {
     const base = {
       demo_mode: config.demoMode,
-      planner: config.openAiApiKey ? "openai" : "template_fallback",
+      planner: config.geminiApiKey ? "gemini" : "template_fallback",
       live_provider_integrations: 0,
     };
 
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
         status: "ok",
         database: "ready",
         database_backend: "postgres",
-        database_host: target.host,
+        ...(config.demoMode ? { database_host: target.host } : {}),
         database_pooled: target.pooled,
         seeded_merchants: merchants?.n ?? 0,
         pending_delivery_jobs: queued?.n ?? 0,
@@ -46,14 +46,14 @@ export async function GET(request: Request) {
       });
     } catch (error) {
       log("error", "healthz.database_unavailable", {
-        reason: error instanceof Error ? error.message : "unknown",
+        reason: "database_unavailable",
       });
       return NextResponse.json(
         {
           status: "degraded",
           database: "unavailable",
           database_backend: "postgres",
-          reason: error instanceof Error ? error.message : "unknown",
+          reason: "database_unavailable",
           ...base,
         },
         { status: 503 },

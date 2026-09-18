@@ -157,6 +157,10 @@ export async function computeSignal(db: Db, merchantId: string, asOf: string): P
   const eligibleAll = absent.filter((signal) => signal.eligible);
   const eligible = eligibleAll.slice(0, RETENTION_POLICY.cohortCap);
   const overCap = eligibleAll.length - eligible.length;
+  for (const customer of eligibleAll.slice(RETENTION_POLICY.cohortCap)) {
+    customer.eligible = false;
+    customer.exclusionReason = "over_cohort_cap";
+  }
 
   return {
     asOf,

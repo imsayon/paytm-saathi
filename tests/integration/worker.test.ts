@@ -116,7 +116,7 @@ test("an expired lease is reclaimed after a worker crash", async () => {
     `SELECT status, lease_owner FROM delivery_job WHERE id = $1`,
     [job!.id],
   );
-  assert.ok(["DELIVERED", "FAILED"].includes(after!.status), `expected a terminal status, got ${after!.status}`);
+  assert.equal(after!.status, "NEEDS_REVIEW", "a restarted mock has no delivery evidence, so recovery must stop instead of blindly sending");
   assert.equal(after!.lease_owner, null, "a finished job holds no lease");
 });
 
@@ -222,7 +222,7 @@ test("outcomes cannot be simulated before approval", async () => {
   assert.equal(await count(db, `SELECT COUNT(*)::int AS n FROM outcome`), 0);
 });
 
-test("only a customer who actually received the message can return", async () => {
+test("the scripted simulator counts campaign returns only for delivered messages", async () => {
   const { db, ctx, campaignId } = await approvedCampaign();
   await drainQueue(db);
   await runOutcomeSimulation(db, ctx, campaignId);
@@ -244,4 +244,20 @@ test("the mock provider sends nothing outside the recorded attempt log", async (
     12,
     "10 first attempts, plus a status check and a retry for the timed-out job",
   );
+});
+
+test("reclaimed lease checks delivery status even when the crashed worker never recorded its attempt", async () => {
+  const { db } = await approvedCampaign();
+  const target = await db.one<{id:string}>(`SELECT id FROM delivery_job ORDER BY seq LIMIT 1`);
+  await db.run(`UPDATE delivery_job SET status='PROCESSING', lease_expires_at=$1 WHERE id=$2`, [new Date(Date.now()-60000).toISOString(),target!.id]);
+  let sends=0, checks=0;
+  await drainQueue(db,{maxJobs:1,provider:{name:'crash-proof',async getStatus(){checks++;return {state:'delivered',providerMessageId:'already-sent',raw:'confirmed'};},async send(){sends++;throw new Error('must not resend');}}});
+  assert.equal(checks,1); assert.equal(sends,0);
+  assert.equal((await db.one<{status:string}>(`SELECT status FROM delivery_job WHERE id=$1`,[target!.id]))!.status,'DELIVERED');
+});
+
+test("pending delivery cannot freeze an incomplete outcome report", async () => {
+  const { db,ctx,campaignId }=await approvedCampaign();
+  await assert.rejects(runOutcomeSimulation(db,ctx,campaignId),/Finish mock delivery/);
+  assert.equal(await count(db,`SELECT COUNT(*)::int AS n FROM outcome`),0);
 });

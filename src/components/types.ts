@@ -1,4 +1,9 @@
+import type { OfferOption } from "@/server/domain/rules";
 export type Proposal = {
+  copy_format?: "separate_reward";
+  copy_source?: "model" | "template_fallback" | "merchant";
+  comparison_explanation?: string;
+  comparison_source?: "model" | "template_fallback";
   audience_label: string;
   offer: { kind: string; amount_minor: number; valid_days: number; weekday_only: boolean };
   timing: { local_start: string; local_end: string };
@@ -82,6 +87,8 @@ export type CampaignDetail = {
     created_at: string;
   };
   proposal: Proposal;
+  offer_options: OfferOption[];
+  reward_promise: string;
   rule_result: RuleResult;
   rule_result_at_creation?: RuleResult;
   approval: { id: string; version: number; approver: string; created_at: string } | null;

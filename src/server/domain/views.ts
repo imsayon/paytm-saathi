@@ -3,7 +3,7 @@ import type { MerchantContext } from "../auth/context";
 import type { Db } from "../db/client";
 import { listRecipients, loadCampaign, loadVersion, type CampaignRow, type VersionRow } from "./campaign";
 import { buildReport, type MeasurementReport } from "./measurement";
-import { validateProposal, type Proposal, type RuleResult } from "./rules";
+import { compareOffers, rewardPromise, validateProposal, type Proposal, type RuleResult } from "./rules";
 import { computeSignal, type CustomerSignal, type SignalSummary } from "./signal";
 
 /** Customer identifiers are masked everywhere they leave the server. */
@@ -135,6 +135,8 @@ export type CampaignDetail = {
     created_at: string;
   };
   proposal: Proposal;
+  offer_options: ReturnType<typeof compareOffers>;
+  reward_promise: string;
   /** Re-evaluated against current data, so the screen cannot disagree with approval. */
   rule_result: RuleResult;
   /** Immutable record of what was validated when the version was written. */
@@ -197,6 +199,8 @@ export async function buildCampaignDetail(db: Db, ctx: MerchantContext, campaign
       created_at: version.created_at,
     },
     proposal,
+    offer_options: compareOffers(signal.eligibleCount, version.cap_minor),
+    reward_promise: rewardPromise(proposal.offer),
     rule_result: validateProposal({ proposal, signal, budgetCapMinor: version.cap_minor }),
     rule_result_at_creation: version.rule_result,
     approval: approval ?? null,

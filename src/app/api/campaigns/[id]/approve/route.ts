@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { NextResponse } from "next/server";
 import { requireMerchantContext } from "@/server/auth/context";
 import { getDb } from "@/server/db/client";
@@ -9,7 +10,7 @@ import { handle, readJson } from "@/server/http";
 
 export const dynamic = "force-dynamic";
 
-type ApproveBody = { version?: number };
+const approveSchema = z.object({ version: z.number().int().positive() }).strict();
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return handle(request, async ({ requestId }) => {
@@ -23,7 +24,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       throw new AppError("BAD_REQUEST", "An Idempotency-Key header is required to approve a campaign.");
     }
 
-    const body = await readJson<ApproveBody>(request);
+    const body = await readJson(request, approveSchema);
     if (!Number.isInteger(body.version)) {
       throw new AppError("BAD_REQUEST", "version must be the integer version number being approved.");
     }

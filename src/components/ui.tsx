@@ -85,7 +85,7 @@ export function DemoBanner({ planner }: { planner?: string }) {
       {planner ? (
         <>
           {" "}
-          Planner: <code>{planner === "openai" ? "OpenAI" : "deterministic template fallback"}</code>.
+          Planner: <code>{planner === "gemini" ? "Gemini (configured; draft source shown on review)" : "deterministic template fallback"}</code>.
         </>
       ) : null}
     </div>
@@ -153,4 +153,8 @@ export async function apiCall<T>(
     throw Object.assign(new Error(error.message), { details: error.details, code: error.code });
   }
   return payload as T;
+}
+
+export function InitialLoad({ error, retry }: { error: { message: string } | null; retry: () => void }) {
+  return <div className="card">{error ? <><ErrorBanner error={error} /><button onClick={retry}>Retry loading</button></> : <div className="skeleton" role="status" aria-label="Loading" style={{ width: "60%" }} />}</div>;
 }

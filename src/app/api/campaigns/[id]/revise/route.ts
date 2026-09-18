@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { NextResponse } from "next/server";
 import { requireMerchantContext } from "@/server/auth/context";
 import { getDb } from "@/server/db/client";
@@ -11,15 +12,15 @@ import { handle, readJson } from "@/server/http";
 export const dynamic = "force-dynamic";
 
 /** Only these fields are merchant-editable. Audience membership is never edited by hand. */
-type ReviseBody = {
-  audience_label?: string;
-  reward_minor?: number;
-  valid_days?: number;
-  weekday_only?: boolean;
-  timing?: { local_start?: string; local_end?: string };
-  copy?: { headline?: string; body?: string; cta?: string };
-  budget_cap_minor?: number;
-};
+const reviseSchema = z.object({
+  reward_minor: z.number().int().min(0).max(100_000_000).optional(),
+  valid_days: z.number().int().positive().max(60).optional(),
+  weekday_only: z.boolean().optional(),
+  timing: z.object({ local_start: z.string().max(5).optional(), local_end: z.string().max(5).optional() }).strict().optional(),
+  copy: z.object({ headline: z.string().max(200).optional(), body: z.string().max(500).optional(), cta: z.string().max(80).optional() }).strict().optional(),
+  copy_format: z.literal("separate_reward").optional(),
+  budget_cap_minor: z.number().int().positive().max(2_147_483_647).optional(),
+}).strict().refine((body) => Object.keys(body).length > 0, "Provide at least one edit.");
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return handle(request, async ({ requestId }) => {
@@ -28,7 +29,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await seedMerchant(db);
     const ctx = await requireMerchantContext(db);
 
-    const body = await readJson<ReviseBody>(request);
+    const body = await readJson(request, reviseSchema);
     const campaign = await loadCampaign(db, ctx, id);
     const current = await loadVersion(db, campaign.id, campaign.current_version);
     const base: Proposal = current.proposal;
@@ -42,7 +43,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const proposal: Proposal = {
       ...base,
-      audience_label: body.audience_label ?? base.audience_label,
+      copy_source: "merchant",
+      copy_format: body.copy_format ?? base.copy_format,
       offer: {
         ...base.offer,
         amount_minor: body.reward_minor ?? base.offer.amount_minor,

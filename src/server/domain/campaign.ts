@@ -262,6 +262,10 @@ export async function reviseCampaign(db: Db, ctx: MerchantContext, input: Revise
   return db.transaction(async (tx) => {
     // Re-read under a row lock so two concurrent edits cannot both become "version N+1".
     const campaign = await loadCampaign(tx, ctx, input.campaignId, { forUpdate: true });
+    if (["REPORTED", "EXPIRED", "FAILED"].includes(campaign.status)) {
+      throw new AppError("RULE_VIOLATION", `A ${campaign.status} campaign cannot be revised.`);
+    }
+    const previous = await loadVersion(tx, campaign.id, campaign.current_version);
     const nextVersion = campaign.current_version + 1;
     const version = await writeVersion(tx, {
       ctx,
@@ -271,7 +275,7 @@ export async function reviseCampaign(db: Db, ctx: MerchantContext, input: Revise
       ruleResult,
       signal,
       capMinor: input.budgetCapMinor,
-      aiSource: "template_fallback",
+      aiSource: previous.ai_source,
     });
 
     // A changed plan cannot inherit an old authorization.

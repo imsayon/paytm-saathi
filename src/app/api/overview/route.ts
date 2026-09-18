@@ -42,7 +42,7 @@ export async function GET(request: Request) {
         suggested_intent: DEMO_INTENT,
         suggested_budget_cap_minor: DEMO_BUDGET_CAP_MINOR,
         demo_mode: config.demoMode,
-        planner: config.openAiApiKey ? "openai" : "template_fallback",
+        planner: config.geminiApiKey ? "gemini" : "template_fallback",
       },
       last_import: lastImport ?? null,
       signal,

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { z } from "zod";
 import { config } from "./config";
 import { AppError, errorBody } from "./errors";
 import { log, newRequestId } from "./observability/log";
@@ -24,7 +25,7 @@ export async function handle(request: Request, handler: Handler): Promise<NextRe
     const appError =
       error instanceof AppError
         ? error
-        : new AppError("UNAVAILABLE", error instanceof Error ? error.message : "Unexpected server error.");
+        : new AppError("UNAVAILABLE", "The service is temporarily unavailable. Please retry.");
 
     log(appError.status >= 500 ? "error" : "warn", "http.error", {
       request_id: requestId,
@@ -42,12 +43,41 @@ export async function handle(request: Request, handler: Handler): Promise<NextRe
   }
 }
 
-export async function readJson<T>(request: Request): Promise<T> {
+export async function readJson<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
+  if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
+    throw new AppError("BAD_REQUEST", "Content-Type must be application/json.");
+  }
+  const reader = request.body?.getReader();
+  if (!reader) throw new AppError("BAD_REQUEST", "A JSON request body is required.");
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
   try {
-    return (await request.json()) as T;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > config.maxImportBytes * 6 + 1024) {
+        await reader.cancel();
+        throw new AppError("BAD_REQUEST", "Request body exceeds the upload limit.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
     throw new AppError("BAD_REQUEST", "Request body must be valid JSON.");
   }
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    throw new AppError("BAD_REQUEST", "Request fields are invalid.", {
+      fields: result.error.issues.map((issue) => ({ field: issue.path.join("."), message: issue.message })),
+    });
+  }
+  return result.data;
 }
 
 export function requireDemoMode(): void {

@@ -10,8 +10,8 @@ export type AppConfig = {
   readonly migrationDatabaseUrl: string;
   readonly hasDatabaseUrl: boolean;
   demoMode: boolean;
-  openAiApiKey: string | null;
-  openAiModel: string;
+  geminiApiKey: string | null;
+  geminiModel: string;
   maxImportBytes: number;
   maxImportRows: number;
   policyVersion: string;
@@ -48,8 +48,8 @@ export function loadConfig(): AppConfig {
       return nonEmpty(process.env.DATABASE_URL) !== null;
     },
     demoMode: readBool(process.env.SAATHI_DEMO_MODE, true),
-    openAiApiKey: nonEmpty(process.env.OPENAI_API_KEY),
-    openAiModel: process.env.SAATHI_OPENAI_MODEL ?? "gpt-5-mini",
+    geminiApiKey: nonEmpty(process.env.GEMINI_API_KEY),
+    geminiModel: process.env.SAATHI_GEMINI_MODEL ?? "gemini-2.5-flash",
     maxImportBytes: 2 * 1024 * 1024,
     maxImportRows: 20000,
     policyVersion: "retention-v1",

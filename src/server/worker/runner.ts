@@ -3,7 +3,7 @@ import { closeDb, getDb, newId, type Db } from "../db/client";
 import { log } from "../observability/log";
 import { mockProvider } from "../providers/mock";
 import type { DeliveryProvider } from "../providers/types";
-import type { Proposal } from "../domain/rules";
+import { rewardPromise, type Proposal } from "../domain/rules";
 
 export const MAX_ATTEMPTS = 2;
 const LEASE_MS = 30_000;
@@ -41,18 +41,17 @@ async function claimJob(db: Db, workerId: string): Promise<JobRow | null> {
   const leaseExpiry = new Date(now + LEASE_MS).toISOString();
 
   const claimed = await db.one<JobRow>(
-    `UPDATE delivery_job
+    `WITH candidate AS (
+       SELECT id, status FROM delivery_job
+        WHERE status = 'QUEUED'
+           OR (status = 'UNKNOWN' AND attempt_count < $4)
+           OR (status = 'PROCESSING' AND lease_expires_at IS NOT NULL AND lease_expires_at < $5)
+        ORDER BY seq LIMIT 1 FOR UPDATE SKIP LOCKED
+     )
+     UPDATE delivery_job j
         SET status = 'PROCESSING', lease_owner = $1, lease_expires_at = $2, updated_at = $3
-      WHERE id = (
-        SELECT id FROM delivery_job
-         WHERE status = 'QUEUED'
-            OR (status = 'UNKNOWN' AND attempt_count < $4)
-            OR (status = 'PROCESSING' AND lease_expires_at IS NOT NULL AND lease_expires_at < $5)
-         ORDER BY seq
-         LIMIT 1
-         FOR UPDATE SKIP LOCKED
-      )
-      RETURNING id, merchant_id, campaign_id, version_id, recipient_id, customer_id, status, provider_key, attempt_count, scenario_slot`,
+       FROM candidate WHERE j.id = candidate.id
+      RETURNING j.id, j.merchant_id, j.campaign_id, j.version_id, j.recipient_id, j.customer_id, candidate.status, j.provider_key, j.attempt_count, j.scenario_slot`,
     [workerId, leaseExpiry, nowIso, MAX_ATTEMPTS, nowIso],
   );
   return claimed ?? null;
@@ -176,7 +175,8 @@ async function processJob(db: Db, job: JobRow, provider: DeliveryProvider): Prom
 
   // Retry path: a previous attempt timed out, so prove nothing was delivered
   // before sending anything again.
-  if (job.status === "UNKNOWN" || job.attempt_count > 0) {
+  const recovering = job.status === "UNKNOWN" || job.status === "PROCESSING" || job.attempt_count > 0;
+  if (recovering) {
     const status = await provider.getStatus(job.provider_key);
 
     if (status.state === "delivered") {
@@ -229,12 +229,12 @@ async function processJob(db: Db, job: JobRow, provider: DeliveryProvider): Prom
     providerKey: job.provider_key,
     recipientRef: context.contact_ref!,
     headline: proposal.copy.headline,
-    body: proposal.copy.body,
+    body: proposal.copy_format === "separate_reward" ? `${proposal.copy.body} ${rewardPromise(proposal.offer)}` : proposal.copy.body,
     cta: proposal.copy.cta,
     scenarioSlot: job.scenario_slot,
   });
 
-  const sendAttemptNo = job.attempt_count > 0 ? attemptNo + 1 : attemptNo;
+  const sendAttemptNo = recovering ? attemptNo + 1 : attemptNo;
 
   if (result.outcome === "delivered") {
     await settle(db, job, {
@@ -388,7 +388,7 @@ async function runForever(): Promise<void> {
     } catch (error) {
       // A transient database error must not kill the worker; the lease makes
       // whatever was mid-flight claimable again once it expires.
-      log("error", "worker.iteration_failed", { reason: error instanceof Error ? error.message : "unknown" });
+      log("error", "worker.iteration_failed", { reason: "database_or_provider_unavailable" });
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
@@ -399,7 +399,7 @@ async function runForever(): Promise<void> {
 const isDirectRun = process.argv[1]?.endsWith("runner.ts") || process.argv[1]?.endsWith("runner.js");
 if (isDirectRun) {
   runForever().catch((error) => {
-    log("error", "worker.crashed", { reason: error instanceof Error ? error.message : "unknown" });
+    log("error", "worker.crashed", { reason: "database_or_provider_unavailable" });
     process.exitCode = 1;
   });
 }

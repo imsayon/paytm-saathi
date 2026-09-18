@@ -164,6 +164,11 @@ export function parseCsv(content: string, options: { maxRows: number }): ParseRe
       );
     }
 
+    const amount = Number(amountRaw);
+    if (!Number.isSafeInteger(amount) || amount > 2_147_483_647) {
+      throw new AppError("BAD_REQUEST", `Row ${rowNumber}: amount_minor exceeds the supported integer range.`, { row: rowNumber });
+    }
+
     const base = {
       merchantId,
       customerId,
@@ -171,7 +176,7 @@ export function parseCsv(content: string, options: { maxRows: number }): ParseRe
       contactRef: contactRef || null,
       consent: consent as ConsentState,
       paidAt: new Date(paidAtMs).toISOString(),
-      amountMinor: Number.parseInt(amountRaw, 10),
+      amountMinor: amount,
       status: status as PaymentState,
     };
 

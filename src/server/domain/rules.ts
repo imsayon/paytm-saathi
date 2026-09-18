@@ -26,6 +26,10 @@ export type Copy = {
 };
 
 export type Proposal = {
+  copy_format?: "separate_reward";
+  copy_source?: "model" | "template_fallback" | "merchant";
+  comparison_explanation?: string;
+  comparison_source?: "model" | "template_fallback";
   audience_label: string;
   offer: Offer;
   timing: { local_start: string; local_end: string };
@@ -34,6 +38,30 @@ export type Proposal = {
   exclusions: string[];
   model_estimated_cost_minor: number | null;
 };
+
+export function rewardPromise(offer: Offer): string {
+  return `Get ₹${(offer.amount_minor / 100).toFixed(2)} off one order${offer.weekday_only ? " on a weekday" : ""}. Valid for ${offer.valid_days} days.`;
+}
+
+export const COMPARISON_EXPLANATION = "A smaller reward limits maximum expenditure; a larger reward gives each contacted customer more. These options do not predict returns or profit.";
+
+export function compareOffers(audienceCount: number, budgetCapMinor: number) {
+  if (!Number.isSafeInteger(audienceCount) || audienceCount < 2 || !Number.isSafeInteger(budgetCapMinor) || budgetCapMinor <= 0) return [];
+  const maximum = Math.min(Math.floor(budgetCapMinor / audienceCount), OFFER_POLICY.maxRewardMinor);
+  const groups = splitGroups(audienceCount);
+  return [...new Set([50, 75, 100].map((percent) => Math.floor(maximum * percent / 100)))]
+    .filter((reward) => reward >= OFFER_POLICY.minRewardMinor)
+    .map((reward) => ({
+      reward_minor: reward,
+      audience_count: audienceCount,
+      campaign_group_size: groups.campaign,
+      holdout_group_size: groups.holdout,
+      conservative_exposure_minor: audienceCount * reward,
+      campaign_exposure_minor: groups.campaign * reward,
+    }));
+}
+
+export type OfferOption = ReturnType<typeof compareOffers>[number];
 
 export type RuleError = { code: string; message: string; field?: string };
 
@@ -103,11 +131,11 @@ export function validateProposal(input: {
   const estimatedCostMinor = audienceCount * rewardMinor;
   const groups = splitGroups(audienceCount);
 
-  if (audienceCount === 0) {
+  if (audienceCount < 2) {
     errors.push({
       code: "NO_ELIGIBLE_COHORT",
       message:
-        "No customer satisfies the retention policy with consent and a contact reference, so there is nothing to approve.",
+        "At least two eligible customers are required for a campaign and an untouched holdout.",
     });
   }
 
@@ -181,6 +209,10 @@ export function validateProposal(input: {
       )} reward. Update the copy so it promises what the offer actually gives.`,
       field: "copy.body",
     });
+  }
+
+  if (proposal.copy_format === "separate_reward" && /[\d₹%]|\b(?:INR|Rs|rupees?)\b/i.test(Object.values(proposal.copy).join(" "))) {
+    errors.push({ code: "COPY_OFFER_MISMATCH", message: "Keep amounts and numeric terms in the generated offer sentence, not the editable introduction.", field: "copy" });
   }
 
   if (!Number.isInteger(budgetCapMinor) || budgetCapMinor <= 0) {

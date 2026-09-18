@@ -6,6 +6,7 @@ import { OFFER_POLICY } from "../domain/rules";
  * treated as untrusted text until it parses here.
  */
 export const plannerOutputSchema = z.object({
+  comparison_explanation: z.string().min(10).max(300),
   audience_label: z.string().min(3).max(120),
   offer: z.object({
     kind: z.enum(OFFER_POLICY.allowedKinds),
@@ -34,6 +35,7 @@ export const plannerJsonSchema = {
   type: "object",
   additionalProperties: false,
   required: [
+    "comparison_explanation",
     "audience_label",
     "offer",
     "timing",
@@ -43,6 +45,7 @@ export const plannerJsonSchema = {
     "exclusions",
   ],
   properties: {
+    comparison_explanation: { type: "string", maxLength: 300 },
     audience_label: { type: "string" },
     offer: {
       type: "object",
@@ -60,8 +63,8 @@ export const plannerJsonSchema = {
       additionalProperties: false,
       required: ["local_start", "local_end"],
       properties: {
-        local_start: { type: "string" },
-        local_end: { type: "string" },
+        local_start: { type: "string", pattern: "^\\d{2}:\\d{2}$" },
+        local_end: { type: "string", pattern: "^\\d{2}:\\d{2}$" },
       },
     },
     rationale: { type: "array", items: { type: "string" } },

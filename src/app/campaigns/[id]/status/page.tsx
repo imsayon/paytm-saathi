@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import type { CampaignDetail } from "@/components/types";
-import { apiCall, AuditTimeline, DemoBanner, ErrorBanner, Stat, StatusPill, Steps } from "@/components/ui";
+import { InitialLoad, apiCall, AuditTimeline, DemoBanner, ErrorBanner, Stat, StatusPill, Steps } from "@/components/ui";
 
 export default function StatusPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -11,6 +11,7 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       setDetail(await apiCall<CampaignDetail>(`/api/campaigns/${id}`));
     } catch (caught) {
@@ -38,13 +39,7 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
     }
   }
 
-  if (!detail) {
-    return (
-      <div className="card">
-        <div className="skeleton" style={{ width: "50%" }} />
-      </div>
-    );
-  }
+  if (!detail) return <InitialLoad error={error} retry={() => void load()} />;
 
   const summary = detail.job_summary;
   const pending = (summary.QUEUED ?? 0) + (summary.PROCESSING ?? 0) + (summary.UNKNOWN ?? 0);

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { NextResponse } from "next/server";
 import { requireMerchantContext } from "@/server/auth/context";
 import { getDb } from "@/server/db/client";
@@ -10,11 +11,11 @@ import { importCsv } from "@/server/importer/import";
 
 export const dynamic = "force-dynamic";
 
-type ImportBody = {
-  use_fixture?: boolean;
-  csv?: string;
-  source_name?: string;
-};
+const importSchema = z.object({
+  use_fixture: z.boolean().optional(),
+  csv: z.string().optional(),
+  source_name: z.string().trim().min(1).max(200).optional(),
+}).strict().refine((body) => body.use_fixture === true ? body.csv === undefined : Boolean(body.csv), "Provide either use_fixture: true or a csv string.");
 
 export async function POST(request: Request) {
   return handle(request, async ({ requestId }) => {
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
     const ctx = await requireMerchantContext(db);
     rateLimit(`import:${ctx.merchantId}`, 10, 60_000);
 
-    const body = await readJson<ImportBody>(request);
+    const body = await readJson(request, importSchema);
     if (!body.use_fixture && !body.csv) {
       throw new AppError("BAD_REQUEST", "Provide either use_fixture: true or a csv string.");
     }

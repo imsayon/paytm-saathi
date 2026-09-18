@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiCall, DemoBanner, ErrorBanner, Stat, StatusPill, Steps } from "@/components/ui";
+import { InitialLoad, apiCall, DemoBanner, ErrorBanner, Stat, StatusPill, Steps } from "@/components/ui";
 
 type Overview = {
   merchant: { id: string; name: string; timezone: string; demo_session: boolean };
@@ -30,6 +30,7 @@ export default function ImportPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       setOverview(await apiCall<Overview>("/api/overview"));
       setError(null);
@@ -88,16 +89,8 @@ export default function ImportPage() {
     }
   }
 
-  if (error) return <ErrorBanner error={error} />;
 
-  if (!overview) {
-    return (
-      <div className="card">
-        <div className="skeleton" style={{ width: "40%", marginBottom: 10 }} />
-        <div className="skeleton" style={{ width: "70%" }} />
-      </div>
-    );
-  }
+  if (!overview) return <InitialLoad error={error} retry={() => void load()} />;
 
   const signal = overview.signal;
 

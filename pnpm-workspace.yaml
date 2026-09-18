@@ -2,3 +2,7 @@
 # esbuild ships its platform binary through a postinstall; tsx needs it.
 allowBuilds:
   esbuild: true
+# The inherited lockfile pins this official SDK release from event day.
+# Keep the age check for every other package and future SDK version.
+minimumReleaseAgeExclude:
+  - openai@7.18.0

@@ -26,7 +26,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ ready: true, pending_migrations: [] });
     } catch (error) {
       return NextResponse.json(
-        { ready: false, reason: error instanceof Error ? error.message : "database unavailable" },
+        { ready: false, reason: "Database is unavailable. Please retry." },
         { status: 503 },
       );
     }
