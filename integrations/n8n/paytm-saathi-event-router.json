@@ -1,0 +1,80 @@
+{
+  "name": "Paytm Saathi · signed event router",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "paytm-saathi/events",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "saathi-webhook",
+      "name": "Saathi domain events",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "webhookId": "paytm-saathi-events"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst body = $json.body ?? $json;\nconst headers = $json.headers ?? {};\nconst given = headers['x-saathi-signature'] ?? headers['X-Saathi-Signature'] ?? '';\nconst secret = $env.SAATHI_N8N_SECRET ?? '';\nconst expected = secret ? `sha256=${crypto.createHmac('sha256', secret).update(JSON.stringify(body)).digest('hex')}` : '';\nconst verified = Boolean(secret && given && given === expected);\nconst event = typeof body === 'object' && body !== null ? body : {};\nconst route = event.event === 'delivery.needs_review' ? 'operator_review' : event.event === 'report.generated' ? 'report_ready' : event.event === 'campaign.approved' || event.event === 'jobs.queued' ? 'campaign_monitoring' : 'audit';\nreturn [{ json: { ok: verified, verified, route: verified ? route : 'reject', received_event: event.event ?? 'unknown', next_action: verified ? (route === 'operator_review' ? 'Ask a merchant operator to review the delivery state; do not retry blindly.' : route === 'report_ready' ? 'Share a descriptive report with synthetic-data caveats.' : route === 'campaign_monitoring' ? 'Watch the mock queue and keep approval as the human gate.' : 'Retain the event for audit.') : 'Reject the event and investigate the shared secret.', event } }];"
+      },
+      "id": "verify-and-route",
+      "name": "Verify HMAC + choose safe action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "id": "verified", "leftValue": "={{ $json.verified }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "verified-gate",
+      "name": "Verified?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, route: 'reject', reason: 'invalid_signature' }) }}",
+        "options": { "responseCode": 401 }
+      },
+      "id": "reject",
+      "name": "Reject unsigned event",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [720, 160]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, route: $json.route, next_action: $json.next_action, event: $json.received_event }) }}",
+        "options": { "responseCode": 202 }
+      },
+      "id": "accepted",
+      "name": "Acknowledge safe action",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [720, -80]
+    }
+  ],
+  "connections": {
+    "Saathi domain events": { "main": [[{ "node": "Verify HMAC + choose safe action", "type": "main", "index": 0 }]] },
+    "Verify HMAC + choose safe action": { "main": [[{ "node": "Verified?", "type": "main", "index": 0 }]] },
+    "Verified?": { "main": [[{ "node": "Acknowledge safe action", "type": "main", "index": 0 }], [{ "node": "Reject unsigned event", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "saathi-event-router-v1",
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": []
+}

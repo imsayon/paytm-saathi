@@ -2,6 +2,7 @@ import { recordAudit } from "../audit/events";
 import type { MerchantContext } from "../auth/context";
 import { newId, type Db } from "../db/client";
 import { AppError } from "../errors";
+import { rememberFact } from "../memory/store";
 import { listRecipients, loadCampaign, loadVersion } from "./campaign";
 import { stableHash } from "./signal";
 import { addDays } from "./time";
@@ -178,6 +179,14 @@ export async function runOutcomeSimulation(db: Db, ctx: MerchantContext, campaig
         simulated: true,
         note: "Synthetic fixed-seed simulation. Descriptive only; not evidence of production effect.",
       },
+    });
+
+    await rememberFact(tx, {
+      merchantId: ctx.merchantId,
+      campaignId: campaign.id,
+      kind: "reported",
+      fact: `Seven-day report (synthetic): ${campaignReturners.size} of ${campaignGroup.length} contacted customers returned versus ${holdoutReturners.size} of ${holdoutGroup.length} held out; descriptive, not causal.`,
+      details: { campaign_returns: campaignReturners.size, campaign_size: campaignGroup.length, holdout_returns: holdoutReturners.size, holdout_size: holdoutGroup.length, simulated: true },
     });
 
     return {

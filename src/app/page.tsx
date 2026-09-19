@@ -21,6 +21,20 @@ type Overview = {
     eligible_count: number;
     excluded: { consent_false: number; consent_unknown: number; no_contact_ref: number; over_cohort_cap: number };
   } | null;
+  latest_synthetic: {
+    id: string;
+    seed: number;
+    persona: { merchant_name?: string; area?: string; city?: string; category?: string };
+    persona_source: string;
+    row_count: number;
+    customer_count: number;
+    created_at: string;
+  } | null;
+  memory: { facts: number };
+  integrations: {
+    n8n: { configured: boolean; pending_events: number; last_event_at: string | null };
+    cognee: { configured: boolean };
+  };
   campaigns: { id: string; intent: string; status: string; current_version: number; created_at: string }[];
 };
 
@@ -61,9 +75,12 @@ const GUARANTEES = [
 export default function ImportPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState<{ message: string } | null>(null);
-  const [busy, setBusy] = useState<"import" | "upload" | "reset" | null>(null);
+  const [busy, setBusy] = useState<"import" | "upload" | "reset" | "synthetic" | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [syntheticSeed, setSyntheticSeed] = useState("20260919");
+  const [syntheticCustomers, setSyntheticCustomers] = useState("90");
+  const [syntheticAbsentShare, setSyntheticAbsentShare] = useState("30");
   const hero = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -146,6 +163,42 @@ export default function ImportPage() {
     }
   }
 
+  function randomizeSyntheticSeed() {
+    setSyntheticSeed(String(Math.max(1, Math.floor(Date.now() % 2_147_483_647))));
+  }
+
+  async function generateSynthetic() {
+    setBusy("synthetic");
+    setUploadError(null);
+    setFlash(null);
+    try {
+      const seed = Number.parseInt(syntheticSeed, 10);
+      const customers = Number.parseInt(syntheticCustomers, 10);
+      const absentShare = Number.parseInt(syntheticAbsentShare, 10) / 100;
+      const result = await apiCall<{
+        synthetic: {
+          seed: number;
+          persona_source: string;
+          persona: { merchant_name?: string; area?: string; city?: string; category?: string };
+          import: { rowCount?: number; row_count?: number; customerCount?: number; customer_count?: number };
+        };
+      }>("/api/synthetic/generate", {
+        method: "POST",
+        body: JSON.stringify({ seed, customers, absent_share: absentShare, replace: true }),
+      });
+      const persona = result.synthetic.persona;
+      const rowCount = result.synthetic.import.rowCount ?? result.synthetic.import.row_count ?? 0;
+      const customerCount = result.synthetic.import.customerCount ?? result.synthetic.import.customer_count ?? customers;
+      const source = result.synthetic.persona_source === "model" ? "Gemini-shaped persona" : "deterministic persona";
+      setFlash(`Generated ${persona.merchant_name ?? "a fresh merchant"} · ${customerCount} customers · ${rowCount} payments · ${source}.`);
+      await load();
+    } catch (caught) {
+      setUploadError((caught as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (!overview) return <InitialLoad error={error} retry={() => void load()} />;
 
   const signal = overview.signal;
@@ -203,7 +256,7 @@ export default function ImportPage() {
               <b>{signal ? signal.total_customers : 78}</b> synthetic customers
             </div>
             <div className="hero-stat">
-              <b>0</b> live integrations
+              <b>{Number(overview.integrations.n8n.configured) + Number(overview.integrations.cognee.configured)}</b> optional integrations
             </div>
             <div className="hero-stat">
               <b>1</b> human approval gate
@@ -223,6 +276,66 @@ export default function ImportPage() {
           ) : null}
         </div>
       </section>
+
+      <div className="grid two" style={{ marginTop: 16 }}>
+        <TiltCard className="card" data-reveal>
+          <div className="page-head" style={{ marginBottom: 8 }}>
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 4 }}><span className="blink" /> synthetic studio</div>
+              <h2 style={{ margin: 0 }}>Make the demo data move</h2>
+            </div>
+            <span className="pill info plain">seeded + reproducible</span>
+          </div>
+          <p className="tiny muted" style={{ marginTop: 0 }}>
+            Every seed creates a different fictional merchant, customer mix, payment history and retention signal. Gemini may name
+            the persona; rules generate the numbers, consent and exclusions.
+          </p>
+          <div className="two-col">
+            <div className="field">
+              <label htmlFor="synthetic-seed">Seed</label>
+              <input id="synthetic-seed" type="number" min="1" max="2147483647" value={syntheticSeed} onChange={(event) => setSyntheticSeed(event.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="synthetic-customers">Customers</label>
+              <input id="synthetic-customers" type="number" min="20" max="400" value={syntheticCustomers} onChange={(event) => setSyntheticCustomers(event.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="synthetic-absent-share">Absent regulars (%)</label>
+              <input id="synthetic-absent-share" type="number" min="10" max="50" value={syntheticAbsentShare} onChange={(event) => setSyntheticAbsentShare(event.target.value)} />
+            </div>
+          </div>
+          <div className="actions" style={{ marginTop: 14 }}>
+            <button onClick={generateSynthetic} disabled={busy !== null}>
+              {busy === "synthetic" ? <span className="spinner" /> : <Icon name="spark" size={15} />} Generate + replace active dataset
+            </button>
+            <button className="ghost small" onClick={randomizeSyntheticSeed} disabled={busy !== null}>
+              <Icon name="refresh" size={14} /> New seed
+            </button>
+          </div>
+        </TiltCard>
+
+        <TiltCard className="card" data-reveal>
+          <div className="page-head" style={{ marginBottom: 8 }}>
+            <h2 style={{ margin: 0 }}>Retained context</h2>
+            <span className="pill neutral plain">Neon record</span>
+          </div>
+          {overview.latest_synthetic ? (
+            <>
+              <h3 style={{ marginTop: 0 }}>{overview.latest_synthetic.persona.merchant_name ?? "Generated merchant"}</h3>
+              <p className="tiny muted" style={{ marginTop: 0 }}>
+                {overview.latest_synthetic.persona.area ?? "Neighbourhood"}, {overview.latest_synthetic.persona.city ?? "India"} · seed <code>{overview.latest_synthetic.seed}</code>
+              </p>
+              <div className="kv"><span className="key">Latest active dataset</span><span className="value">{overview.latest_synthetic.customer_count} customers · {overview.latest_synthetic.row_count} payments</span></div>
+            </>
+          ) : (
+            <p className="muted">Generate a dataset to create a new active merchant story.</p>
+          )}
+          <div className="kv"><span className="key">Saathi memory</span><span className="value">{overview.memory.facts} retained fact{overview.memory.facts === 1 ? "" : "s"}</span></div>
+          <div className="kv"><span className="key">n8n event bridge</span><span className="value">{overview.integrations.n8n.configured ? `${overview.integrations.n8n.pending_events} pending` : "not configured"}</span></div>
+          <div className="kv"><span className="key">Cognee mirror</span><span className="value">{overview.integrations.cognee.configured ? "configured" : "Neon fallback"}</span></div>
+          <p className="note" style={{ marginBottom: 0 }}>Resets retire active rows but preserve audit, integration events, memory and dataset history.</p>
+        </TiltCard>
+      </div>
 
       <Marquee items={GUARANTEES} />
 

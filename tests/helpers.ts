@@ -78,6 +78,7 @@ export async function seedMerchant(db: Db, id = DEMO_MERCHANT_ID, name = "Test m
     timezone: "Asia/Kolkata",
     actor: "test-approver",
     isDemoSession: true,
+    user: null,
   };
 }
 

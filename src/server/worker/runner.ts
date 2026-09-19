@@ -1,4 +1,6 @@
 import { closeDb, getDb, newId, type Db } from "../db/client";
+import { config } from "../config";
+import { dispatchPendingEvents } from "../integrations/events";
 import { log } from "../observability/log";
 import { getDeliveryProvider } from "../providers";
 import type { DeliveryProvider } from "../providers/types";
@@ -145,10 +147,14 @@ async function settle(
        UPDATE delivery_job
           SET status = $9, attempt_count = $3, lease_owner = NULL, lease_expires_at = NULL, updated_at = $8
         WHERE id = $2
+     ), audited AS (
+       INSERT INTO audit_event
+         (id, merchant_id, campaign_id, version_id, job_id, actor, action, entity, old_state, new_state, request_id, details, created_at)
+       VALUES ($10, $11, $12, $13, $2, 'worker', $14, $15, $16, $9, NULL, $17::jsonb, $8)
      )
-     INSERT INTO audit_event
-       (id, merchant_id, campaign_id, version_id, job_id, actor, action, entity, old_state, new_state, request_id, details, created_at)
-     VALUES ($10, $11, $12, $13, $2, 'worker', $14, $15, $16, $9, NULL, $17::jsonb, $8)`,
+     INSERT INTO integration_event (id, merchant_id, campaign_id, event, payload, status, created_at)
+     SELECT $18, $11, $12, $14, jsonb_build_object('job_id', $2::text, 'new_state', $9::text) || $17::jsonb, $19, $8
+      WHERE $14 = 'delivery.needs_review'`,
     [
       newId("att"),
       job.id,
@@ -167,6 +173,8 @@ async function settle(
       `delivery_job:${job.id}`,
       input.audit.oldState ?? null,
       JSON.stringify(input.audit.details),
+      newId("evt"),
+      config.n8nWebhookUrl && config.n8nSecret ? "pending" : "skipped",
     ],
   );
 }
@@ -339,10 +347,13 @@ export async function refreshCampaignDeliveryStatus(db: Db, campaignId: string):
     await db.run(
       `WITH changed AS (
          UPDATE campaign SET status = $1, updated_at = $2 WHERE id = $3
+       ), audited AS (
+         INSERT INTO audit_event
+           (id, merchant_id, campaign_id, version_id, job_id, actor, action, entity, old_state, new_state, request_id, details, created_at)
+         VALUES ($4, $5, $3, NULL, NULL, 'worker', 'campaign.delivery_status_changed', $6, $7, $1, NULL, $8::jsonb, $2)
        )
-       INSERT INTO audit_event
-         (id, merchant_id, campaign_id, version_id, job_id, actor, action, entity, old_state, new_state, request_id, details, created_at)
-       VALUES ($4, $5, $3, NULL, NULL, 'worker', 'campaign.delivery_status_changed', $6, $7, $1, NULL, $8::jsonb, $2)`,
+       INSERT INTO integration_event (id, merchant_id, campaign_id, event, payload, status, created_at)
+       VALUES ($9, $5, $3, 'campaign.delivery_status_changed', jsonb_build_object('old_state', $7::text, 'new_state', $1::text) || $8::jsonb, $10, $2)`,
       [
         next,
         now,
@@ -357,6 +368,8 @@ export async function refreshCampaignDeliveryStatus(db: Db, campaignId: string):
           needs_review: campaign.needs_review,
           pending: campaign.pending,
         }),
+        newId("evt"),
+        config.n8nWebhookUrl && config.n8nSecret ? "pending" : "skipped",
       ],
     );
   }
@@ -413,6 +426,7 @@ async function runForever(): Promise<void> {
     try {
       const summary = await drainQueue(db);
       if (summary.processed > 0) log("info", "worker.drained", { ...summary });
+      await dispatchPendingEvents(db);
     } catch (error) {
       // A transient database error must not kill the worker; the lease makes
       // whatever was mid-flight claimable again once it expires.

@@ -6,6 +6,7 @@ import { DEMO_AS_OF, FIXTURE_NAME, readFixture, seedMerchant } from "@/server/de
 import { computeSignal } from "@/server/domain/signal";
 import { signalView } from "@/server/domain/views";
 import { AppError } from "@/server/errors";
+import { asOfFor } from "@/server/demo/synth";
 import { handle, rateLimit, readJson } from "@/server/http";
 import { importCsv } from "@/server/importer/import";
 
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
     const sourceName = body.use_fixture ? FIXTURE_NAME : (body.source_name ?? "upload.csv");
 
     const result = await importCsv(db, ctx, { content, sourceName, requestId });
-    const signal = await computeSignal(db, ctx.merchantId, DEMO_AS_OF);
+    const signal = await computeSignal(db, ctx.merchantId, asOfFor(ctx));
 
     return NextResponse.json(
       {

@@ -10,7 +10,7 @@ const input: PlannerInput = {
   inactive_days: 21, budget_cap_minor: 30000, allowed_offer: "fixed_reward",
   allowed_valid_days: OFFER_POLICY.allowedValidDays, policy_version: RETENTION_POLICY.version,
   excluded_counts: { consent_false: 2, consent_unknown: 2, no_contact_ref: 0, over_cohort_cap: 0 },
-  offer_options: compareOffers(20, 30000),
+  offer_options: compareOffers(20, 30000), merchant_memory: [],
 };
 const result = await runPlanner(input);
 console.log(JSON.stringify({ source: result.source, model: result.model, latency_ms: result.latencyMs,

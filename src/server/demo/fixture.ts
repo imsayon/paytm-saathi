@@ -26,9 +26,12 @@ export function readFixture(): string {
 }
 
 /**
- * Demo control: removes every row that belongs to the demo merchant so the
- * rehearsed sequence can be run again from "Load demo CSV". The merchant row
- * itself stays. Order follows the foreign keys.
+ * Demo control: removes the active domain rows that belong to the merchant so
+ * the rehearsed sequence can be run again from "Load demo CSV". The merchant
+ * row stays, while audit events, integration events, decision memory and
+ * synthetic dataset metadata remain append-only evidence. Synthetic metadata
+ * is detached from the retired import batch before that batch is removed.
+ * Order follows the foreign keys.
  */
 export async function resetDemoData(db: Db, merchantId: string): Promise<Record<string, number>> {
   return db.transaction(async (tx) => {
@@ -44,10 +47,12 @@ export async function resetDemoData(db: Db, merchantId: string): Promise<Record<
     deleted.campaign_recipient = await tx.run(`DELETE FROM campaign_recipient WHERE merchant_id = $1`, [merchantId]);
     deleted.campaign_version = await tx.run(`DELETE FROM campaign_version WHERE merchant_id = $1`, [merchantId]);
     deleted.campaign = await tx.run(`DELETE FROM campaign WHERE merchant_id = $1`, [merchantId]);
-    deleted.audit_event = await tx.run(`DELETE FROM audit_event WHERE merchant_id = $1`, [merchantId]);
+    // Keep audit history and integration events: a demo reset is a new run, not
+    // permission to erase the merchant's decision trail.
     deleted.payment = await tx.run(`DELETE FROM payment WHERE merchant_id = $1`, [merchantId]);
     deleted.consent = await tx.run(`DELETE FROM consent WHERE merchant_id = $1`, [merchantId]);
     deleted.customer = await tx.run(`DELETE FROM customer WHERE merchant_id = $1`, [merchantId]);
+    deleted.synthetic_dataset = await tx.run(`UPDATE synthetic_dataset SET import_batch_id = NULL WHERE merchant_id = $1 AND import_batch_id IS NOT NULL`, [merchantId]);
     deleted.import_batch = await tx.run(`DELETE FROM import_batch WHERE merchant_id = $1`, [merchantId]);
     return deleted;
   });

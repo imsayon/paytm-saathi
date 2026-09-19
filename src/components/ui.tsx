@@ -195,8 +195,8 @@ export function DemoBanner({ planner }: { planner?: string }) {
     <div className="demo-flag" data-reveal>
       <Icon name="shield" />
       <div>
-        <strong>Demo build.</strong> Synthetic data, a development-only merchant session, and a mock delivery provider. No
-        Paytm integration and no real customer is ever contacted.
+        <strong>Sandbox boundary.</strong> Synthetic data, a human approval gate, and aggregate-only AI planning. Paytm credentials
+        are not connected; delivery is mock unless a live provider is explicitly configured after approval.
         {planner ? (
           <>
             {" "}
@@ -329,8 +329,25 @@ export function ThemeToggle() {
   );
 }
 
+type Me = { signed_in: boolean; auth_configured: boolean; merchant: { name: string; demo_session: boolean } | null; user: { email: string | null; phone: string | null } | null };
+
 export function Nav() {
   const pathname = usePathname();
+  const [me, setMe] = useState<Me | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setMe(data);
+      })
+      .catch(() => {
+        // The header simply shows no session state.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
   const links = [
     { href: "/", label: "Import", active: pathname === "/" },
     { href: "/signals", label: "Signal", active: pathname.startsWith("/signals") },
@@ -344,6 +361,16 @@ export function Nav() {
         </a>
       ))}
       {campaign ? <span className="pill info plain">Campaign</span> : null}
+      {me?.signed_in ? (
+        <form action="/auth/signout" method="post" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <span className="pill ok plain" title={me.merchant?.name ?? ""}>{me.user?.email ?? me.user?.phone ?? "signed in"}</span>
+          <button type="submit" className="ghost small">Sign out</button>
+        </form>
+      ) : me?.auth_configured ? (
+        <a href="/login" className={pathname === "/login" ? "active" : undefined}>
+          Sign in
+        </a>
+      ) : null}
       <ThemeToggle />
     </nav>
   );

@@ -39,6 +39,11 @@ services:
         value: "true"
       - key: SAATHI_GEMINI_MODEL
         value: gemini-2.5-flash
+      # Supabase Auth identity only. Neon remains the product database.
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false
       # Neon pooled endpoint (host contains "-pooler"): application traffic.
       - key: DATABASE_URL
         sync: false
@@ -59,4 +64,14 @@ services:
         sync: false
       # Set to the service's public URL so Twilio status callbacks can be verified.
       - key: PUBLIC_BASE_URL
+        sync: false
+      # Optional signed n8n automation sink. Keep empty to retain Neon-only operation.
+      - key: N8N_WEBHOOK_URL
+        sync: false
+      - key: N8N_WEBHOOK_SECRET
+        sync: false
+      # Optional Cognee memory mirror. Neon is authoritative if this is absent.
+      - key: COGNEE_BASE_URL
+        value: https://api.cognee.ai
+      - key: COGNEE_API_KEY
         sync: false

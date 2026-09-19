@@ -343,3 +343,57 @@ test("computed comparisons are read-only; choosing a reward requires a fresh app
   await drainQueue(db,{provider:{name:'capture',live:false,async send(message){sent++;assert.ok(message.body.endsWith(final.reward_promise));return {outcome:'delivered',providerMessageId:'captured',raw:'ok'};},async getStatus(){return {state:'unavailable',raw:'unknown'};}}});
   assert.equal(sent,10);
 });
+
+test("a generated synthetic dataset imports and yields a non-empty, explainable audience", async () => {
+  const { generateSyntheticCsv, fallbackPersona } = await import("../../src/server/demo/synth");
+  const { importCsv } = await import("../../src/server/importer/import");
+  const db = await tempDb();
+  const ctx = await seedMerchant(db);
+  const persona = fallbackPersona(42, 90);
+  const generated = generateSyntheticCsv({ merchantId: ctx.merchantId, asOf: AS_OF, seed: 42, customers: 90, absentShare: 0.3, persona });
+  const result = await importCsv(db, ctx, { content: generated.csv, sourceName: "synthetic-42.csv" });
+  assert.equal(result.customerCount, 90);
+  const signal = await computeSignal(db, ctx.merchantId, AS_OF);
+  assert.equal(signal.absentRegulars, generated.expected.absent_regulars, "every absent regular the generator intended is detected");
+  assert.equal(signal.excluded.consent_false, generated.expected.consent_false);
+  assert.equal(signal.excluded.consent_unknown, generated.expected.consent_unknown);
+  assert.ok(signal.eligibleCount >= 2 && signal.eligibleCount <= 20);
+});
+
+test("reset retires active data but keeps audit, memory, integration and synthetic history", async () => {
+  const { resetDemoData } = await import("../../src/server/demo/fixture");
+  const { recordAudit } = await import("../../src/server/audit/events");
+  const { rememberFact } = await import("../../src/server/memory/store");
+  const { newId } = await import("../../src/server/db/client");
+  const db = await tempDb();
+  const ctx = await seedMerchant(db);
+  const result = await importRows(db, ctx, absentRegularRows("C00"));
+
+  await recordAudit(db, {
+    merchantId: ctx.merchantId,
+    actor: ctx.actor,
+    action: "import.published",
+    entity: `import:${result.batchId}`,
+    details: { row_count: result.rowCount },
+  });
+  await rememberFact(db, {
+    merchantId: ctx.merchantId,
+    kind: "dataset",
+    fact: "A synthetic dataset was loaded for reset retention coverage.",
+  });
+  await db.run(
+    `INSERT INTO synthetic_dataset (id, merchant_id, seed, persona, persona_source, row_count, customer_count, import_batch_id, created_at)
+     VALUES ($1, $2, 9, $3::jsonb, 'rules', 3, 1, $4, $5)`,
+    [newId("syn"), ctx.merchantId, JSON.stringify({ merchant_name: "Test café" }), result.batchId, new Date().toISOString()],
+  );
+
+  await resetDemoData(db, ctx.merchantId);
+
+  assert.equal(await count(db, `SELECT COUNT(*)::int AS n FROM payment`), 0);
+  assert.equal(await count(db, `SELECT COUNT(*)::int AS n FROM customer`), 0);
+  assert.ok((await count(db, `SELECT COUNT(*)::int AS n FROM audit_event`)) >= 1);
+  assert.ok((await count(db, `SELECT COUNT(*)::int AS n FROM integration_event`)) >= 1);
+  assert.ok((await count(db, `SELECT COUNT(*)::int AS n FROM merchant_memory`)) >= 1);
+  assert.equal(await count(db, `SELECT COUNT(*)::int AS n FROM synthetic_dataset`), 1);
+  assert.equal(await count(db, `SELECT COUNT(*)::int AS n FROM synthetic_dataset WHERE import_batch_id IS NULL`), 1);
+});

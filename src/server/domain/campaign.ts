@@ -4,6 +4,7 @@ import type { MerchantContext } from "../auth/context";
 import { assertOwnedByMerchant } from "../auth/context";
 import { newId, type Db } from "../db/client";
 import { AppError } from "../errors";
+import { rememberFact } from "../memory/store";
 import { validateProposal, type Proposal, type RuleResult } from "./rules";
 import { computeSignal, stableHash, type SignalSummary } from "./signal";
 
@@ -235,6 +236,16 @@ export async function createCampaignPreview(db: Db, ctx: MerchantContext, input:
       },
     });
 
+    if (!ruleResult.eligible) {
+      await rememberFact(tx, {
+        merchantId: ctx.merchantId,
+        campaignId,
+        kind: "draft_blocked",
+        fact: `A draft at ₹${(input.proposal.offer.amount_minor / 100).toFixed(2)} for ${ruleResult.audience_count} eligible customers was blocked (${ruleResult.errors.map((e) => e.code).join(", ")}); the cap was ₹${(input.budgetCapMinor / 100).toFixed(2)}.`,
+        details: { reward_minor: input.proposal.offer.amount_minor, cap_minor: input.budgetCapMinor, errors: ruleResult.errors.map((e) => e.code) },
+      });
+    }
+
     return { campaignId, version, ruleResult, signal };
   });
 }
@@ -316,6 +327,16 @@ export async function reviseCampaign(db: Db, ctx: MerchantContext, input: Revise
         estimated_cost_minor: ruleResult.estimated_cost_minor,
         rules_passed: ruleResult.eligible,
       },
+    });
+
+    await rememberFact(tx, {
+      merchantId: ctx.merchantId,
+      campaignId: campaign.id,
+      kind: "revised",
+      fact: `The merchant revised version ${campaign.current_version} to ₹${(input.proposal.offer.amount_minor / 100).toFixed(2)} (from ₹${(previous.proposal.offer.amount_minor / 100).toFixed(2)})${
+        previous.proposal.copy.headline !== input.proposal.copy.headline || previous.proposal.copy.body !== input.proposal.copy.body ? " and edited the copy" : ""
+      }; rules ${ruleResult.eligible ? "passed" : "still blocked it"}.`,
+      details: { from_minor: previous.proposal.offer.amount_minor, to_minor: input.proposal.offer.amount_minor, passed: ruleResult.eligible },
     });
 
     return { campaign, version, ruleResult, signal };
@@ -506,6 +527,14 @@ export async function approveCampaign(db: Db, ctx: MerchantContext, input: Appro
         provider: "mock",
         note: "No provider call happens in this transaction.",
       },
+    });
+
+    await rememberFact(tx, {
+      merchantId: ctx.merchantId,
+      campaignId: campaign.id,
+      kind: "approved",
+      fact: `Approved ₹${(proposal.offer.amount_minor / 100).toFixed(2)} for ${ruleResult.audience_count} absent regulars (${ordered.length} contacted, ${recipients.length - campaignGroup.length} held out) under a ₹${(version.cap_minor / 100).toFixed(2)} cap; validity ${proposal.offer.valid_days} days${proposal.offer.weekday_only ? ", weekdays only" : ""}.`,
+      details: { reward_minor: proposal.offer.amount_minor, cap_minor: version.cap_minor, audience: ruleResult.audience_count, contacted: ordered.length },
     });
 
     return {

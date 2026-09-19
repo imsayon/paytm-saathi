@@ -3,6 +3,8 @@ import type { z } from "zod";
 import { config } from "./config";
 import { AppError, errorBody } from "./errors";
 import { log, newRequestId } from "./observability/log";
+import { dispatchSoon } from "./integrations/events";
+import { getDb } from "./db/client";
 
 export type Handler = (context: { requestId: string; request: Request }) => Promise<NextResponse> | NextResponse;
 
@@ -13,6 +15,7 @@ export async function handle(request: Request, handler: Handler): Promise<NextRe
   try {
     const response = await handler({ requestId, request });
     response.headers.set("x-request-id", requestId);
+    if (request.method !== "GET" && config.hasDatabaseUrl) dispatchSoon(getDb());
     log("info", "http.ok", {
       request_id: requestId,
       method: request.method,

@@ -1,5 +1,6 @@
 import type { Db } from "../db/client";
 import { newId } from "../db/client";
+import { INTEGRATION_ACTIONS, recordIntegrationEvent } from "../integrations/events";
 
 export type AuditInput = {
   merchantId: string;
@@ -37,6 +38,14 @@ export async function recordAudit(db: Db, input: AuditInput): Promise<string> {
       new Date().toISOString(),
     ],
   );
+  if (INTEGRATION_ACTIONS.has(input.action)) {
+    await recordIntegrationEvent(db, {
+      merchantId: input.merchantId,
+      campaignId: input.campaignId ?? null,
+      event: input.action,
+      payload: { entity: input.entity, actor: input.actor, old_state: input.oldState ?? null, new_state: input.newState ?? null, ...(input.details ?? {}) },
+    });
+  }
   return id;
 }
 

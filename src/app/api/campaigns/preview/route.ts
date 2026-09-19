@@ -9,7 +9,9 @@ import { computeSignal } from "@/server/domain/signal";
 import { isValidDateString } from "@/server/domain/time";
 import { buildCampaignDetail } from "@/server/domain/views";
 import { AppError } from "@/server/errors";
+import { asOfFor } from "@/server/demo/synth";
 import { handle, rateLimit, readJson } from "@/server/http";
+import { recallFacts } from "@/server/memory/store";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +31,7 @@ export async function POST(request: Request) {
     const body = await readJson(request, previewSchema);
     const intent = (body.intent ?? "").trim();
     const budgetCapMinor = body.budget_cap_minor ?? DEMO_BUDGET_CAP_MINOR;
-    const asOf = body.as_of ?? DEMO_AS_OF;
+    const asOf = body.as_of ?? asOfFor(ctx);
 
     if (intent.length < 5 || intent.length > 500) {
       throw new AppError("BAD_REQUEST", "Intent must be between 5 and 500 characters.");
@@ -47,7 +49,7 @@ export async function POST(request: Request) {
     }
 
     const signal = await computeSignal(db, ctx.merchantId, asOf);
-    const plannerInput = buildPlannerInput({ intent, signal, budgetCapMinor, timezone: ctx.timezone });
+    const plannerInput = buildPlannerInput({ intent, signal, budgetCapMinor, timezone: ctx.timezone, memory: await recallFacts(db, ctx.merchantId) });
     const planner = await runPlanner(plannerInput);
 
     const { campaignId } = await createCampaignPreview(db, ctx, {
