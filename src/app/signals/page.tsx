@@ -124,6 +124,7 @@ export default function SignalsPage() {
 
   const eligible = signal.absent_customers.filter((customer) => customer.eligible);
   const excluded = signal.absent_customers.filter((customer) => !customer.eligible);
+  const excludedPreview = excluded.slice(0, 50);
   const selected = eligible.filter((customer) => selectedCustomerIds.has(customer.selection_id));
   const campaignSize = Math.floor(selected.length / 2);
   const holdoutSize = selected.length - campaignSize;
@@ -291,7 +292,7 @@ export default function SignalsPage() {
             </tr>
           </thead>
           <tbody>
-            {excluded.map((customer, index) => (
+            {excludedPreview.map((customer, index) => (
               <tr key={`${customer.customer_ref}-${index}`}>
                 <td>
                   <code>{customer.customer_ref}</code>
@@ -304,6 +305,11 @@ export default function SignalsPage() {
             ))}
           </tbody>
         </table>
+        <p className="note">
+          {excluded.length > excludedPreview.length
+            ? `Showing ${excludedPreview.length} of ${excluded.length} excluded customers. Eligibility counts remain complete.`
+            : "Eligibility counts remain complete."}
+        </p>
       </div>
     </Reveal>
   );
