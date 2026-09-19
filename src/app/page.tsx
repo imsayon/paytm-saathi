@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Pipeline, Reveal, type PipelineStage } from "@/components/motion";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Marquee, ParticleField, Pipeline, Rail, Reveal, SplitText, TiltCard, type PipelineStage, type RailStage } from "@/components/motion";
 import { apiCall, DemoBanner, Icon, InitialLoad, Stat, StatusPill, Steps } from "@/components/ui";
 
 type Overview = {
@@ -24,14 +24,38 @@ type Overview = {
   campaigns: { id: string; intent: string; status: string; current_version: number; created_at: string }[];
 };
 
-const STAGES: PipelineStage[] = [
-  { key: "import", title: "Import", detail: "Settled payments, validated whole-file", icon: <Icon name="upload" /> },
-  { key: "signal", title: "Signal", detail: "Regulars who went quiet, by rule", icon: <Icon name="users" /> },
-  { key: "plan", title: "Draft", detail: "Bounded copy from aggregates only", icon: <Icon name="pen" /> },
-  { key: "review", title: "Review", detail: "Rules verify budget and promise", icon: <Icon name="shield" /> },
-  { key: "approve", title: "Approve", detail: "One immutable version, one lock", icon: <Icon name="stamp" />, gate: true },
-  { key: "deliver", title: "Mock delivery", detail: "Idempotent jobs, status before retry", icon: <Icon name="send" /> },
-  { key: "report", title: "Holdout report", detail: "Campaign vs control, formulas shown", icon: <Icon name="chart" /> },
+const RAIL: RailStage[] = [
+  { key: "import", title: "Import", detail: "validated whole-file", glyph: <path d="M12 16V4M7 9l5-5 5 5M4 20h16" /> },
+  { key: "signal", title: "Signal", detail: "regulars gone quiet", glyph: <><circle cx="9" cy="8" r="3.2" /><path d="M3.5 19c.6-3.3 3-5 5.5-5s4.9 1.7 5.5 5M15.5 5.3a3 3 0 010 5.4M17 14c2 .4 3.4 1.9 3.8 5" /></> },
+  { key: "draft", title: "Draft", detail: "aggregates only", glyph: <path d="M4 20l4.5-1 10-10-3.5-3.5-10 10L4 20zM13 7.5l3.5 3.5" /> },
+  { key: "review", title: "Review", detail: "eight rule checks", glyph: <path d="M12 3l7 3v5.5c0 4.4-3 8.1-7 9.5-4-1.4-7-5.1-7-9.5V6l7-3z" /> },
+  { key: "approve", title: "Approve", detail: "the human gate", glyph: <path d="M9 11V6a3 3 0 016 0v5h3l1 5H5l1-5h3zM6 20h12" />, gate: true },
+  { key: "deliver", title: "Mock delivery", detail: "idempotent jobs", glyph: <path d="M3 11.5l18-8-8 18-2.5-7.5L3 11.5z" /> },
+  { key: "report", title: "Holdout report", detail: "campaign vs control", glyph: <path d="M4 20V10M10 20V4M16 20v-8M22 20H2" /> },
+];
+
+const STAGES: PipelineStage[] = RAIL.map((stage) => ({
+  key: stage.key,
+  title: stage.title,
+  detail: stage.detail,
+  gate: stage.gate,
+  icon: (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {stage.glyph}
+    </svg>
+  ),
+}));
+
+const GUARANTEES = [
+  "No provider call before approval",
+  "The holdout receives nothing",
+  "Consent checked three times",
+  "Budget arithmetic by rules, not the model",
+  "One immutable version per approval",
+  "Idempotency-Key on every approval",
+  "Status check before any retry",
+  "Every transition audited in-transaction",
+  "Synthetic data · descriptive, not causal",
 ];
 
 export default function ImportPage() {
@@ -40,6 +64,7 @@ export default function ImportPage() {
   const [busy, setBusy] = useState<"import" | "upload" | "reset" | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const hero = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -54,6 +79,14 @@ export default function ImportPage() {
     void load();
   }, [load]);
 
+  function onHeroMove(event: React.MouseEvent<HTMLDivElement>) {
+    const el = hero.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    el.style.setProperty("--mx", `${(((event.clientX - rect.left) / rect.width) * 100).toFixed(1)}%`);
+    el.style.setProperty("--my", `${(((event.clientY - rect.top) / rect.height) * 100).toFixed(1)}%`);
+  }
+
   async function importFixture() {
     setBusy("import");
     setUploadError(null);
@@ -65,7 +98,7 @@ export default function ImportPage() {
       );
       setFlash(
         result.import.already_imported
-          ? `Already imported: the checksum matched, so nothing was written twice.`
+          ? "Already imported: the checksum matched, so nothing was written twice."
           : `Imported ${result.import.row_count} rows for ${result.import.customer_count} customers.`,
       );
       await load();
@@ -116,37 +149,100 @@ export default function ImportPage() {
   if (!overview) return <InitialLoad error={error} retry={() => void load()} />;
 
   const signal = overview.signal;
-  const excludedForConsent = signal ? signal.excluded.consent_false + signal.excluded.consent_unknown : 0;
 
   return (
     <Reveal ready refreshKey={`${overview.last_import?.id ?? "none"}:${overview.campaigns.length}`}>
       <DemoBanner planner={overview.demo.planner} />
       <Steps current="import" />
 
-      <div data-reveal>
-        <div className="eyebrow">Merchant Growth AI · retention</div>
-        <h1>
-          Bring back the regulars <span className="accent">who stopped coming</span>
-        </h1>
-        <p className="lede">
-          Saathi reads settled payment history, finds customers who used to be regulars and have gone quiet, and takes one
-          measured offer through merchant approval before anything is sent.
-        </p>
-      </div>
+      <section ref={hero} className="hero" onMouseMove={onHeroMove}>
+        <div className="spot" aria-hidden="true" />
+        <ParticleField />
+        <div className="copy">
+          <div className="eyebrow">
+            <span className="blink" /> Merchant Growth AI · retention
+          </div>
+          <h1>
+            <SplitText text="Bring back the regulars" accent="who stopped coming." />
+          </h1>
+          <p className="lede">
+            Saathi reads settled payment history, finds customers who used to be regulars and have gone quiet, and takes one
+            measured offer through merchant approval before anything is sent.
+          </p>
+          <div className="actions">
+            <button onClick={importFixture} disabled={busy !== null}>
+              {busy === "import" ? <span className="spinner" /> : <Icon name="file" size={16} />}
+              Load demo CSV
+            </button>
+            <label className="btn secondary" style={{ marginBottom: 0, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1 }}>
+              {busy === "upload" ? <span className="spinner" /> : <Icon name="upload" size={16} />}
+              Upload CSV
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                style={{ display: "none" }}
+                disabled={busy !== null}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void uploadCsv(file);
+                  event.target.value = "";
+                }}
+              />
+            </label>
+            {signal ? (
+              <a className="btn ghost" href="/signals">
+                Inspect the audience <Icon name="arrow" size={15} />
+              </a>
+            ) : null}
+          </div>
+          <div className="hero-stats">
+            <div className="hero-stat">
+              <b>{overview.last_import ? overview.last_import.row_count : 243}</b> payment rows
+            </div>
+            <div className="hero-stat">
+              <b>{signal ? signal.total_customers : 78}</b> synthetic customers
+            </div>
+            <div className="hero-stat">
+              <b>0</b> live integrations
+            </div>
+            <div className="hero-stat">
+              <b>1</b> human approval gate
+            </div>
+          </div>
+          {uploadError ? (
+            <div className="banner bad" style={{ marginTop: 16 }} role="alert">
+              <Icon name="alert" />
+              <div>{uploadError}</div>
+            </div>
+          ) : null}
+          {flash ? (
+            <div className="banner ok" style={{ marginTop: 16 }}>
+              <Icon name="check" />
+              <div>{flash}</div>
+            </div>
+          ) : null}
+        </div>
+      </section>
 
-      <div className="card" data-reveal style={{ marginBottom: 16 }}>
-        <h3>One loop, in order</h3>
-        <Pipeline stages={STAGES} />
+      <Marquee items={GUARANTEES} />
+
+      <div className="section-title" data-reveal>
+        <h2>How it works</h2>
+        <span className="mono">one loop, in order · approval is the only gate</span>
+      </div>
+      <TiltCard className="card" data-reveal>
+        <Rail stages={RAIL} />
+        <Pipeline stages={STAGES} className="mobile-only" />
         <p className="note">
           Nothing reaches a provider before the approval gate. The holdout never receives a message, so the report can compare
           rather than guess.
         </p>
-      </div>
+      </TiltCard>
 
-      <div className="grid two">
-        <div className="card hero" data-reveal>
+      <div className="grid two" style={{ marginTop: 16 }}>
+        <TiltCard className="card hero-card" data-reveal>
           <h3>Merchant</h3>
-          <h2 style={{ fontSize: 20 }}>{overview.merchant.name}</h2>
+          <h2 style={{ fontSize: 21 }}>{overview.merchant.name}</h2>
           <p className="tiny" style={{ margin: "4px 0 12px" }}>
             {overview.merchant.timezone} · demo session <code>{overview.merchant.id}</code>
           </p>
@@ -168,77 +264,54 @@ export default function ImportPage() {
               </span>
             </div>
           ) : null}
-        </div>
+        </TiltCard>
 
-        <div className="card" data-reveal>
+        <TiltCard className="card" data-reveal>
           <h3>Step 1 — load payment data</h3>
           <p className="tiny muted" style={{ marginTop: 0 }}>
-            The fixture is a frozen synthetic CSV for one Bengaluru merchant: 243 payment rows including refunded and
-            duplicate rows. Re-importing the same file is safe: the checksum makes it idempotent.
+            The fixture is a frozen synthetic CSV for one Bengaluru merchant: 243 payment rows including refunded and duplicate
+            rows. Re-importing the same file is safe: the checksum makes it idempotent.
           </p>
-          <div className="actions" style={{ marginTop: 12 }}>
-            <button onClick={importFixture} disabled={busy !== null}>
-              {busy === "import" ? <span className="spinner" /> : <Icon name="file" size={16} />}
-              Load demo CSV
-            </button>
-            <label className="btn secondary" style={{ marginBottom: 0, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1 }}>
-              {busy === "upload" ? <span className="spinner" /> : <Icon name="upload" size={16} />}
-              Upload CSV
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                style={{ display: "none" }}
-                disabled={busy !== null}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void uploadCsv(file);
-                  event.target.value = "";
-                }}
-              />
-            </label>
-          </div>
           <p className="note">
-            Required columns: <code>merchant_id</code>, <code>customer_id</code>, <code>paid_at</code>,{" "}
-            <code>amount_minor</code>, <code>status</code>, <code>consent</code>. Up to 2 MB.
+            Required columns: <code>merchant_id</code>, <code>customer_id</code>, <code>paid_at</code>, <code>amount_minor</code>,{" "}
+            <code>status</code>, <code>consent</code>. Optional <code>payment_id</code>, <code>customer_name</code>,{" "}
+            <code>contact_ref</code>. Up to 2 MB. Formula-looking cells are neutralised, and a file with one bad row publishes nothing.
           </p>
-          {uploadError ? (
-            <div className="banner bad" style={{ marginTop: 12 }} role="alert">
-              <Icon name="alert" />
-              <div>{uploadError}</div>
+          {overview.demo.demo_mode && (overview.last_import || overview.campaigns.length > 0) ? (
+            <div className="actions" style={{ marginTop: 14 }}>
+              <button className="secondary small" onClick={resetDemo} disabled={busy !== null}>
+                {busy === "reset" ? <span className="spinner" /> : <Icon name="refresh" size={14} />}
+                Reset demo data
+              </button>
+              <span className="tiny muted">Demo control. Clears this merchant&apos;s data from the shared database.</span>
             </div>
           ) : null}
-          {flash ? (
-            <div className="banner ok" style={{ marginTop: 12 }}>
-              <Icon name="check" />
-              <div>{flash}</div>
-            </div>
-          ) : null}
-        </div>
+        </TiltCard>
       </div>
 
       {signal ? (
         <>
-          <h3 style={{ marginTop: 26 }} data-reveal>
-            Retention signal at {overview.demo.as_of}
-          </h3>
+          <div className="section-title" data-reveal>
+            <h2>Retention signal at {overview.demo.as_of}</h2>
+            <span className="mono">deterministic · policy retention-v1</span>
+          </div>
           <div className="grid four">
             <Stat value={signal.total_customers} label="Customers imported" />
             <Stat value={signal.regular_customers} label="Regulars in last 60 days" tone="info" />
             <Stat value={signal.absent_regulars} label="Regulars now absent 21+ days" tone="warn" />
             <Stat value={signal.eligible_count} label="Eligible after consent" tone="ok" />
           </div>
-          <div className="card interactive" data-reveal>
+          <TiltCard className="card interactive" data-reveal>
             <div className="actions">
               <a className="btn" href="/signals">
                 Inspect the audience <Icon name="arrow" size={15} />
               </a>
               <span className="tiny muted">
                 {signal.excluded.consent_false} consent false · {signal.excluded.consent_unknown} consent unknown ·{" "}
-                {signal.excluded.no_contact_ref} without contact reference are excluded.
-                {excludedForConsent > 0 ? " Consent is a hard gate, not a score." : ""}
+                {signal.excluded.no_contact_ref} without contact reference are excluded. Consent is a hard gate, not a score.
               </span>
             </div>
-          </div>
+          </TiltCard>
         </>
       ) : (
         <div className="card" style={{ marginTop: 20 }} data-reveal>
@@ -277,21 +350,6 @@ export default function ImportPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-        </div>
-      ) : null}
-
-      {overview.demo.demo_mode && (overview.last_import || overview.campaigns.length > 0) ? (
-        <div className="card" data-reveal>
-          <div className="actions">
-            <button className="secondary" onClick={resetDemo} disabled={busy !== null}>
-              {busy === "reset" ? <span className="spinner" /> : <Icon name="refresh" size={15} />}
-              Reset demo data
-            </button>
-            <span className="tiny muted">
-              Demo control. Clears this merchant&apos;s imports, campaigns, jobs and simulated outcomes from the shared database so
-              the sequence can be rehearsed again. Nothing here is real customer data.
-            </span>
           </div>
         </div>
       ) : null}

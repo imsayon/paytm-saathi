@@ -10,14 +10,19 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#012970",
+  themeColor: "#070d1f",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" data-theme="light" suppressHydrationWarning>
+    <html lang="en" data-theme="dark" suppressHydrationWarning>
       <body>
-        <div className="ambient" aria-hidden="true" />
+        <div className="ambient" aria-hidden="true">
+          <div className="dots" />
+          <div className="glow a" />
+          <div className="glow b" />
+          <div className="grain" />
+        </div>
         <header className="topbar">
           <div className="inner">
             <a className="brand" href="/">
@@ -32,8 +37,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
         <main className="shell">{children}</main>
         <footer className="footer">
-          <span>Synthetic demo. No live Paytm integration, no real customer is contacted.</span>
-          <span>Rules own eligibility, consent, budget and state; the model only drafts.</span>
+          <div className="inner">
+            <span>synthetic demo · no live paytm integration · no real customer is contacted</span>
+            <span>rules own eligibility, consent, budget and state · the model only drafts</span>
+          </div>
         </footer>
       </body>
     </html>

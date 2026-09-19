@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { CountUp, Reveal } from "@/components/motion";
+import { CountUp, Reveal, TiltCard } from "@/components/motion";
 
 export function rupees(minor: number): string {
   return `₹${(minor / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -128,7 +128,8 @@ export function Stat({
   icon?: string;
 }) {
   return (
-    <div className={`card stat-card${tone ? ` tone-${tone}` : ""}`} data-reveal>
+    <TiltCard className={`card stat-card${tone ? ` tone-${tone}` : ""}`} data-reveal>
+      <span className="glow-bar" aria-hidden="true" />
       <div className="stat">
         <CountUp value={value} />
       </div>
@@ -136,7 +137,7 @@ export function Stat({
         {icon ? <Icon name={icon} size={13} className="muted" /> : null} {label}
       </div>
       {hint ? <div className="stat-hint">{hint}</div> : null}
-    </div>
+    </TiltCard>
   );
 }
 
@@ -294,9 +295,9 @@ export function InitialLoad({ error, retry }: { error: { message: string } | nul
   );
 }
 
-/** Persisted light/dark switch. Light is the default so a projector never gets a dark screen by surprise. */
+/** Persisted light/dark switch. Dark is the default look; one click flips it for a bright projector. */
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
 
   useEffect(() => {
     let stored: string | null = null;
@@ -305,7 +306,7 @@ export function ThemeToggle() {
     } catch {
       stored = null;
     }
-    const initial = stored === "dark" ? "dark" : "light";
+    const initial = stored === "light" ? "light" : "dark";
     setTheme(initial);
     document.documentElement.dataset.theme = initial;
   }, []);

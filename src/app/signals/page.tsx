@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Reveal, SplitMeter } from "@/components/motion";
+import { Reveal, SplitMeter, SplitText, TiltCard } from "@/components/motion";
 import { apiCall, DemoBanner, ErrorBanner, Icon, InitialLoad, rupees, Stat, Steps } from "@/components/ui";
 
 type CustomerView = {
@@ -114,9 +114,11 @@ export default function SignalsPage() {
       <Steps current="signal" />
 
       <div data-reveal>
-        <div className="eyebrow">Step 2 · the signal</div>
+        <div className="eyebrow">
+          <span className="blink" /> Step 2 · the signal
+        </div>
         <h1>
-          Why <span className="accent">these customers?</span>
+          <SplitText text="Why" accent="these customers?" />
         </h1>
         <p className="lede">
           Every number here comes from deterministic rules over settled payments — no model is involved in choosing who is in
@@ -132,7 +134,7 @@ export default function SignalsPage() {
       </div>
 
       <div className="grid two">
-        <div className="card" data-reveal>
+        <TiltCard className="card" data-reveal>
           <h3>Policy {signal.policy.version}</h3>
           <ul className="checks">
             <li>
@@ -169,9 +171,9 @@ export default function SignalsPage() {
               <span>The cohort is capped at {signal.policy.cohortCap} and ordered by a stable hash.</span>
             </li>
           </ul>
-        </div>
+        </TiltCard>
 
-        <div className="card" data-reveal>
+        <TiltCard className="card" data-reveal>
           <h3>Deterministic split (applied at approval)</h3>
           <div className="split-label">
             <span className="pill info">Campaign {campaignSize}</span>
@@ -204,7 +206,7 @@ export default function SignalsPage() {
           <div style={{ marginTop: 12 }}>
             <ErrorBanner error={error} />
           </div>
-        </div>
+        </TiltCard>
       </div>
 
       <div className="card" data-reveal>

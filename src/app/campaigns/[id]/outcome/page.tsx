@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import type { CampaignDetail, MeasurementReport } from "@/components/types";
-import { AnimatedBar, CountUp, Reveal } from "@/components/motion";
+import { AnimatedBar, CountUp, Reveal, SplitText, TiltCard } from "@/components/motion";
 import { apiCall, AuditTimeline, Banner, DemoBanner, ErrorBanner, Icon, InitialLoad, KeyValue, percent, rupees, Stat, StatusPill, Steps } from "@/components/ui";
 
 type OutcomeResponse = {
@@ -75,10 +75,12 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
       <Steps current="outcome" campaignId={id} />
 
       <div data-reveal>
-        <div className="eyebrow">Step 5 · holdout report</div>
+        <div className="eyebrow">
+          <span className="blink" /> Step 5 · holdout report
+        </div>
         <div className="page-head">
           <h1>
-            Seven-day outcome, <span className="accent">against a control</span>
+            <SplitText text="Seven-day outcome," accent="against a control" />
           </h1>
           <StatusPill status={data.campaign.status} />
           <span className="pill neutral plain">version {data.version.version}</span>
@@ -89,12 +91,14 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
         </p>
       </div>
 
-      <div className="card" data-reveal>
+      <TiltCard className="card" data-reveal>
         <div className="actions">
-          <button onClick={runOutcome} disabled={busy}>
-            {busy ? <span className="spinner" /> : <Icon name="clock" size={16} />}
-            {report.has_outcomes ? "Re-run seven-day simulation" : "Advance demo clock seven days"}
-          </button>
+          <span className={`radar${busy ? " on" : ""}`}>
+            <button onClick={runOutcome} disabled={busy}>
+              {busy ? <span className="spinner" /> : <Icon name="clock" size={16} />}
+              {report.has_outcomes ? "Re-run seven-day simulation" : "Advance demo clock seven days"}
+            </button>
+          </span>
           <a className="btn secondary" href={`/campaigns/${id}/status`}>
             Back to delivery
           </a>
@@ -103,7 +107,7 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
         <div style={{ marginTop: 12 }}>
           <ErrorBanner error={error} />
         </div>
-      </div>
+      </TiltCard>
 
       {!report.has_outcomes ? (
         <div className="card" data-reveal>
@@ -122,11 +126,11 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
           </div>
 
           <div className="grid two">
-            <div className="card" data-reveal>
+            <TiltCard className="card" data-reveal>
               <h3>Campaign versus holdout</h3>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6 }}>
-                <span className="stat" style={{ fontSize: 44 }}>
-                  <CountUp value={`${report.observed_lift_pp} pp`} />
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+                <span className="stat hero-number">
+                  <CountUp value={`${report.observed_lift_pp} pp`} duration={1600} />
                 </span>
                 <span className="tiny muted">difference in return rate over the window</span>
               </div>
@@ -140,9 +144,9 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
                 Window {report.window_start} to {report.window_end}. A return is at least one settled, non-refunded, non-duplicate payment
                 inside the window.
               </p>
-            </div>
+            </TiltCard>
 
-            <div className="card" data-reveal>
+            <TiltCard className="card" data-reveal>
               <h3>Money (synthetic)</h3>
               <KeyValue label="Campaign return volume" value={rupees(report.campaign.return_volume_minor)} />
               <KeyValue
@@ -153,7 +157,7 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
               <KeyValue label="Incremental payment volume" value={rupees(report.incremental_payment_volume_minor)} />
               <KeyValue label="Reward cost" value={rupees(report.reward_cost_minor)} hint="redeemed rewards" />
               <KeyValue label="Contribution proxy after reward" value={rupees(report.contribution_proxy_minor)} hint="not profit" />
-            </div>
+            </TiltCard>
           </div>
 
           <div className="grid three">

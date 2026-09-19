@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import type { CampaignDetail, JobView } from "@/components/types";
-import { popIn, Reveal } from "@/components/motion";
+import { popIn, Reveal, SplitText, TiltCard } from "@/components/motion";
 import { apiCall, AuditTimeline, Banner, DemoBanner, ErrorBanner, Icon, InitialLoad, Stat, StatusPill, Steps } from "@/components/ui";
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -90,10 +90,12 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
       <Steps current="delivery" campaignId={id} />
 
       <div data-reveal>
-        <div className="eyebrow">Step 4 · mock delivery</div>
+        <div className="eyebrow">
+          <span className="blink" /> Step 4 · mock delivery
+        </div>
         <div className="page-head">
           <h1>
-            Delivery, <span className="accent">one idempotent job at a time</span>
+            <SplitText text="Delivery," accent="one idempotent job at a time" />
           </h1>
           <StatusPill status={detail.campaign.status} />
           <span className="pill neutral plain">version {detail.campaign.current_version}</span>
@@ -112,12 +114,14 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
         <Stat value={detail.groups.holdout.length} label="Holdout (never contacted)" />
       </div>
 
-      <div className="card" data-reveal>
+      <TiltCard className="card" data-reveal>
         <div className="actions">
-          <button onClick={runDelivery} disabled={busy}>
-            {busy ? <span className="spinner" /> : <Icon name="send" size={16} />}
-            Run mock delivery
-          </button>
+          <span className={`radar${busy ? " on" : ""}`}>
+            <button onClick={runDelivery} disabled={busy}>
+              {busy ? <span className="spinner" /> : <Icon name="send" size={16} />}
+              Run mock delivery
+            </button>
+          </span>
           <a className="btn secondary" href={`/campaigns/${id}/outcome`}>
             Go to outcome report <Icon name="arrow" size={15} />
           </a>
@@ -136,7 +140,7 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
         <div style={{ marginTop: 12 }}>
           <ErrorBanner error={error} />
         </div>
-      </div>
+      </TiltCard>
 
       <div className="card" data-reveal>
         <h3>Delivery jobs</h3>

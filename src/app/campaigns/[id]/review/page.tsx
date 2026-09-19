@@ -4,7 +4,7 @@ import { use, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { COMPARISON_EXPLANATION, rewardPromise } from "@/server/domain/rules";
 import type { CampaignDetail } from "@/components/types";
-import { Reveal, SplitMeter } from "@/components/motion";
+import { Reveal, SplitMeter, SplitText, TiltCard } from "@/components/motion";
 import { apiCall, AuditTimeline, Banner, DemoBanner, ErrorBanner, Icon, InitialLoad, KeyValue, rupees, StatusPill, Steps } from "@/components/ui";
 
 /** The deterministic checks, in the order a merchant would ask about them. */
@@ -114,10 +114,12 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
       <Steps current="review" campaignId={id} />
 
       <div data-reveal>
-        <div className="eyebrow">Step 3 · review and approve</div>
+        <div className="eyebrow">
+          <span className="blink" /> Step 3 · review and approve
+        </div>
         <div className="page-head">
           <h1>
-            Review <span className="accent">before anything is sent</span>
+            <SplitText text="Review" accent="before anything is sent" />
           </h1>
           <StatusPill status={detail.campaign.status} />
           <span className="pill neutral plain">version {detail.campaign.current_version}</span>
@@ -150,7 +152,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
       </div>
 
       <div className="grid two" style={{ marginTop: 16 }}>
-        <div className="card" data-reveal>
+        <TiltCard className="card" data-reveal>
           <div className="page-head" style={{ marginBottom: 10 }}>
             <h2 style={{ margin: 0 }}>Campaign draft</h2>
             <span className={`pill ${detail.version.ai_source === "model" ? "info" : "neutral"}`}>{sourcePill}</span>
@@ -180,9 +182,9 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
           {detail.proposal.model_estimated_cost_minor !== null ? (
             <p className="tiny muted">Model cost estimate: {rupees(detail.proposal.model_estimated_cost_minor)} (advisory only)</p>
           ) : null}
-        </div>
+        </TiltCard>
 
-        <div className="card" data-reveal>
+        <TiltCard className="card" data-reveal>
           <div className="page-head" style={{ marginBottom: 10 }}>
             <h2 style={{ margin: 0 }}>Verified by rules</h2>
             <span className={`pill ${rules.eligible ? "ok" : "bad"}`}>{rules.eligible ? "passing" : "blocked"}</span>
@@ -230,7 +232,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
               </div>
             </div>
           ) : null}
-        </div>
+        </TiltCard>
       </div>
 
       <div className="card" data-reveal>
@@ -356,7 +358,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
             {busy === "revise" ? <span className="spinner" /> : <Icon name="pen" size={15} />}
             Save as version {detail.campaign.current_version + 1}
           </button>
-          <button onClick={approve} disabled={busy !== null || !rules.eligible || dirty || approved}>
+          <button className="amber" onClick={approve} disabled={busy !== null || !rules.eligible || dirty || approved}>
             {busy === "approve" ? <span className="spinner" /> : <Icon name="stamp" size={15} />}
             Approve version {detail.campaign.current_version}
           </button>
