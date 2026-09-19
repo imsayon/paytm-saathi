@@ -99,6 +99,25 @@ test("preview stores one version, recipients split into two groups, and no deliv
   assert.equal((await loadCampaign(db, ctx, campaignId)).status, "REVIEW");
 });
 
+test("the merchant shortlist is the campaign audience", async () => {
+  const { db, ctx } = await setup();
+  const signal = await computeSignal(db, ctx.merchantId, AS_OF);
+  const selectedCustomerIds = signal.eligible.slice(0, 4).map((customer) => customer.customerId);
+  const result = await createCampaignPreview(db, ctx, {
+    intent: "Bring back these important customers.",
+    budgetCapMinor: 30_000,
+    asOf: AS_OF,
+    proposal: proposalOf(),
+    aiSource: "template_fallback",
+    fallbackReason: "test",
+    selectedCustomerIds,
+  });
+
+  assert.equal(result.ruleResult.audience_count, 4);
+  assert.deepEqual(result.version.selected_customer_ids, selectedCustomerIds);
+  assert.equal((await listRecipients(db, result.version.id)).length, 4);
+});
+
 test("an over-cap proposal is stored as blocked and cannot be approved", async () => {
   const { db, ctx } = await setup();
   const { campaignId, ruleResult } = await previewOf(db, ctx, 2500);

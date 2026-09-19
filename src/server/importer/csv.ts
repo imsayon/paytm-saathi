@@ -27,6 +27,11 @@ export type ParsedRow = {
   paidAt: string;
   amountMinor: number;
   status: PaymentState;
+  isImportant: boolean;
+  importanceNote: string | null;
+  customerProfile: Record<string, string>;
+  consentChannel: "sms" | "whatsapp" | "email" | "in_app" | "unknown";
+  consentExpiresAt: string | null;
 };
 
 export type ParseResult = {
@@ -79,6 +84,39 @@ function sanitizeText(value: string): string {
 function derivePaymentId(row: Omit<ParsedRow, "paymentId" | "rowNumber">): string {
   const material = `${row.merchantId}|${row.customerId}|${row.paidAt}|${row.amountMinor}|${row.status}`;
   return `derived_${crypto.createHash("sha256").update(material).digest("hex").slice(0, 24)}`;
+}
+
+const PROFILE_COLUMNS = new Set([
+  "merchant_id",
+  "customer_id",
+  "customer_name",
+  "contact_ref",
+  "consent",
+  "payment_id",
+  "paid_at",
+  "amount_minor",
+  "status",
+  "important",
+  "is_important",
+  "importance_note",
+  "consent_channel",
+  "consent_expires_at",
+]);
+
+function parseBoolean(value: string, rowNumber: number): boolean {
+  if (!value) return false;
+  if (["true", "yes", "1", "important"].includes(value.toLowerCase())) return true;
+  if (["false", "no", "0"].includes(value.toLowerCase())) return false;
+  throw new AppError("BAD_REQUEST", `Row ${rowNumber}: important must be true or false.`, { row: rowNumber });
+}
+
+function parseConsentChannel(value: string, rowNumber: number): ParsedRow["consentChannel"] {
+  if (!value) return "unknown";
+  const allowed = ["sms", "whatsapp", "email", "in_app"] as const;
+  if (!allowed.includes(value as (typeof allowed)[number])) {
+    throw new AppError("BAD_REQUEST", `Row ${rowNumber}: consent_channel must be sms, whatsapp, email or in_app.`, { row: rowNumber });
+  }
+  return value as (typeof allowed)[number];
 }
 
 export function parseCsv(content: string, options: { maxRows: number }): ParseResult {
@@ -169,6 +207,19 @@ export function parseCsv(content: string, options: { maxRows: number }): ParseRe
       throw new AppError("BAD_REQUEST", `Row ${rowNumber}: amount_minor exceeds the supported integer range.`, { row: rowNumber });
     }
 
+    const consentExpiresRaw = read("consent_expires_at");
+    if (consentExpiresRaw && Number.isNaN(Date.parse(consentExpiresRaw))) {
+      throw new AppError("BAD_REQUEST", `Row ${rowNumber}: consent_expires_at "${consentExpiresRaw}" is not a valid timestamp.`, { row: rowNumber });
+    }
+    const consentExpiresAt = consentExpiresRaw ? new Date(Date.parse(consentExpiresRaw)).toISOString() : null;
+
+    const customerProfile: Record<string, string> = {};
+    for (const column of header) {
+      if (PROFILE_COLUMNS.has(column)) continue;
+      const value = read(column);
+      if (value) customerProfile[column] = value.slice(0, 500);
+    }
+
     const base = {
       merchantId,
       customerId,
@@ -178,6 +229,11 @@ export function parseCsv(content: string, options: { maxRows: number }): ParseRe
       paidAt: new Date(paidAtMs).toISOString(),
       amountMinor: amount,
       status: status as PaymentState,
+      isImportant: parseBoolean(read("important") || read("is_important"), rowNumber),
+      importanceNote: read("importance_note") || null,
+      customerProfile,
+      consentChannel: parseConsentChannel(read("consent_channel"), rowNumber),
+      consentExpiresAt,
     };
 
     const paymentId = hasPaymentIdColumn ? read("payment_id") : derivePaymentId(base);

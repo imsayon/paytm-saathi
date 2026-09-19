@@ -16,7 +16,8 @@ export async function GET(request: Request) {
     await seedMerchant(db);
     const ctx = await requireMerchantContext(db);
 
-    const [lastImport, campaigns, latestSynthetic, memory, integration] = await Promise.all([
+    const [merchantSettings, lastImport, campaigns, latestSynthetic, memory, integration] = await Promise.all([
+      db.one<{ default_cap_minor: number }>(`SELECT default_cap_minor FROM merchant WHERE id = $1`, [ctx.merchantId]),
       db.one<{ id: string; source_name: string; row_count: number; imported_at: string; id_strategy: string }>(
         `SELECT id, source_name, row_count, imported_at, id_strategy FROM import_batch
           WHERE merchant_id = $1 ORDER BY imported_at DESC LIMIT 1`,
@@ -55,7 +56,7 @@ export async function GET(request: Request) {
       demo: {
         as_of: asOf,
         suggested_intent: DEMO_INTENT,
-        suggested_budget_cap_minor: DEMO_BUDGET_CAP_MINOR,
+        suggested_budget_cap_minor: merchantSettings?.default_cap_minor ?? DEMO_BUDGET_CAP_MINOR,
         demo_mode: config.demoMode,
         planner: config.geminiApiKey ? "gemini" : "template_fallback",
       },

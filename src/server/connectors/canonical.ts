@@ -14,6 +14,9 @@ export const canonicalPaymentSchema = z.object({
   customer_ref: sourceId,
   customer_name: z.string().trim().min(1).max(120).optional(),
   contact_ref: z.string().trim().min(1).max(240).optional(),
+  important: z.boolean().optional(),
+  importance_note: z.string().trim().max(240).optional(),
+  customer_profile: z.record(z.string(), z.string().max(500)).optional(),
   occurred_at: isoDateTime,
   amount_minor: z.number().int().nonnegative().max(2_147_483_647),
   currency: z.literal("INR"),
@@ -131,32 +134,41 @@ export async function ingestCanonicalBatch(
       [batchId, merchant.id, checksum, `connector:${batch.source}`, batch.payments.length + batch.consents.length, now],
     );
 
-    const customers = new Map<string, { name: string; contact: string | null }>();
+    const customers = new Map<string, { name: string; contact: string | null; important: boolean; note: string | null; profile: Record<string, string> }>();
     for (const payment of batch.payments) {
       const current = customers.get(payment.customer_ref);
       customers.set(payment.customer_ref, {
         name: payment.customer_name ?? current?.name ?? payment.customer_ref,
         contact: payment.contact_ref ?? current?.contact ?? null,
+        important: Boolean(current?.important || payment.important),
+        note: payment.importance_note ?? current?.note ?? null,
+        profile: { ...(current?.profile ?? {}), ...(payment.customer_profile ?? {}) },
       });
     }
     for (const consent of batch.consents) {
-      if (!customers.has(consent.customer_ref)) customers.set(consent.customer_ref, { name: consent.customer_ref, contact: null });
+      if (!customers.has(consent.customer_ref)) customers.set(consent.customer_ref, { name: consent.customer_ref, contact: null, important: false, note: null, profile: {} });
     }
 
     await tx.insertMany(
       "customer",
-      ["id", "merchant_id", "external_id", "display_name", "contact_ref", "created_at"],
+      ["id", "merchant_id", "external_id", "display_name", "contact_ref", "is_important", "importance_note", "profile", "created_at"],
       [...customers.entries()].map(([externalId, customer]) => [
         newId("cus"),
         merchant.id,
         externalId,
         customer.name,
         customer.contact,
+        customer.important,
+        customer.note,
+        JSON.stringify(customer.profile),
         now,
       ]),
       `ON CONFLICT (merchant_id, external_id)
        DO UPDATE SET display_name = excluded.display_name,
-                     contact_ref = COALESCE(excluded.contact_ref, customer.contact_ref)`,
+                     contact_ref = COALESCE(excluded.contact_ref, customer.contact_ref),
+                     is_important = customer.is_important OR excluded.is_important,
+                     importance_note = COALESCE(excluded.importance_note, customer.importance_note),
+                     profile = customer.profile || excluded.profile`,
     );
 
     const customerIds = new Map(

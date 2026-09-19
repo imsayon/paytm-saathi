@@ -25,6 +25,3 @@ playwright-report/
 data/*.db-wal
 data/*.db-shm
 tsconfig.tsbuildinfo
-
-# Local Python prototype kept beside the product for reference; never part of the TypeScript application.
-app.py

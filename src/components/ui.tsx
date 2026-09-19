@@ -350,7 +350,8 @@ export function Nav() {
       {campaign ? <span className="pill info plain">Campaign</span> : null}
       {me?.signed_in ? (
         <form action="/auth/signout" method="post" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <span className="pill ok plain" title={me.user?.email ?? ""}>{me.merchant?.name ?? "Workspace"}</span>
+          <a href="/profile" className={pathname === "/profile" ? "active" : undefined}>Profile</a>
+          <span className="pill ok plain" title="Merchant workspace">{me.merchant?.name ?? "Workspace"}</span>
           <button type="submit" className="ghost small">Sign out</button>
         </form>
       ) : me?.auth_configured ? (

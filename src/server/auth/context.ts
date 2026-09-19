@@ -28,8 +28,8 @@ function merchantIdForUser(userId: string): string {
  * Who is acting, and which merchant's data they may touch.
  *
  * 1. A verified Neon Auth session wins: the merchant is looked up by the user's id and
- *    created on first sign-in (a private, empty workspace named after the
- *    email). Every query downstream is scoped to that merchant id,
+ *    created on first sign-in (a private, empty workspace with a neutral
+ *    name until the merchant completes their profile). Every query downstream is scoped to that merchant id,
  *    so one merchant can never read or approve another's campaign.
  * 2. With no session and demo mode on, the seeded demo merchant is used and
  *    labelled as such.
@@ -48,7 +48,7 @@ export async function requireMerchantContext(db: Db): Promise<MerchantContext> {
          ON CONFLICT (auth_user_id) WHERE auth_user_id IS NOT NULL
          DO UPDATE SET email = excluded.email, created_via = 'neon_auth'
          RETURNING id, name, timezone`,
-        [id, `${user.email ?? "Merchant"}'s shop`, new Date().toISOString(), user.id, user.email],
+        [id, user.name?.trim() || "Your workspace", new Date().toISOString(), user.id, user.email],
       ))!;
     return {
       merchantId: row.id,

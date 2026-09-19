@@ -1,11 +1,4 @@
-/**
- * Regenerates data/fixtures/saathi-demo.csv.
- *
- * The CSV is committed and treated as frozen demo data; this script exists so the
- * fixture is reproducible and reviewable, not so it can be regenerated at runtime.
- *
- * Run: pnpm fixture:generate
- */
+
 import fs from "node:fs";
 import path from "node:path";
 

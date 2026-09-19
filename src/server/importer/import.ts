@@ -55,11 +55,24 @@ export async function importCsv(
   const batchId = newId("imb");
   const now = new Date().toISOString();
 
-  // The first row for each customer carries the name, contact and consent that
-  // the import records, matching how a row-by-row import would behave.
+  // Payment files repeat customer fields on every row. Keep the latest consent
+  // state and merge the profile while preserving the payment rows themselves.
   const firstRowByCustomer = new Map<string, ParsedRow>();
   for (const row of parsed.rows) {
-    if (!firstRowByCustomer.has(row.customerId)) firstRowByCustomer.set(row.customerId, row);
+    const existing = firstRowByCustomer.get(row.customerId);
+    if (!existing) {
+      firstRowByCustomer.set(row.customerId, { ...row, customerProfile: { ...row.customerProfile } });
+      continue;
+    }
+    existing.contactRef ??= row.contactRef;
+    existing.isImportant ||= row.isImportant;
+    existing.importanceNote ??= row.importanceNote;
+    existing.customerProfile = { ...existing.customerProfile, ...row.customerProfile };
+    if (row.paidAt > existing.paidAt) {
+      existing.consent = row.consent;
+      existing.consentChannel = row.consentChannel;
+      existing.consentExpiresAt = row.consentExpiresAt;
+    }
   }
 
   const customerCount = await db.transaction(async (tx) => {
@@ -73,17 +86,24 @@ export async function importCsv(
 
     await tx.insertMany(
       "customer",
-      ["id", "merchant_id", "external_id", "display_name", "contact_ref", "created_at"],
+      ["id", "merchant_id", "external_id", "display_name", "contact_ref", "is_important", "importance_note", "profile", "created_at"],
       [...firstRowByCustomer.values()].map((row) => [
         newId("cus"),
         ctx.merchantId,
         row.customerId,
         row.customerName,
         row.contactRef,
+        row.isImportant,
+        row.importanceNote,
+        JSON.stringify(row.customerProfile),
         now,
       ]),
       `ON CONFLICT (merchant_id, external_id)
-       DO UPDATE SET display_name = excluded.display_name, contact_ref = excluded.contact_ref`,
+       DO UPDATE SET display_name = excluded.display_name,
+                     contact_ref = COALESCE(excluded.contact_ref, customer.contact_ref),
+                     is_important = customer.is_important OR excluded.is_important,
+                     importance_note = COALESCE(excluded.importance_note, customer.importance_note),
+                     profile = customer.profile || excluded.profile`,
     );
 
     const customerIds = new Map(
@@ -97,7 +117,7 @@ export async function importCsv(
 
     await tx.insertMany(
       "consent",
-      ["id", "merchant_id", "customer_id", "state", "source", "observed_at"],
+      ["id", "merchant_id", "customer_id", "state", "source", "observed_at", "purpose", "channel", "expires_at"],
       [...firstRowByCustomer.values()].map((row) => [
         newId("con"),
         ctx.merchantId,
@@ -105,6 +125,9 @@ export async function importCsv(
         row.consent,
         "csv_import",
         row.paidAt,
+        "merchant_reengagement",
+        row.consentChannel,
+        row.consentExpiresAt,
       ]),
     );
 

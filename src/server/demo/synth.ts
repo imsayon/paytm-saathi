@@ -11,7 +11,7 @@ import { resetDemoData } from "./fixture";
 import { DEMO_AS_OF } from "./fixture";
 
 /**
- * Synthetic merchants that are different every time. The persona (shop name,
+ * Generated merchants that are different every time. The persona (shop name,
  * neighbourhood, category, customer names) may come from Gemini; every number
  * (visits, dates, amounts, consent mix, refunds) comes from a seeded generator
  * so the retention signal stays explainable and the model never touches data.
@@ -52,10 +52,12 @@ export function fallbackPersona(seed: number, wanted: number): Persona {
   const random = makeRandom(seed ^ 0x9e3779b9);
   const categories = Object.keys(CATEGORY_AMOUNTS) as Persona["category"][];
   const category = categories[Math.floor(random() * categories.length)]!;
-  const names = new Set<string>();
-  while (names.size < wanted) {
-    names.add(`${FIRST[Math.floor(random() * FIRST.length)]} ${LAST[Math.floor(random() * LAST.length)]}`);
-  }
+  const baseNames = FIRST.flatMap((first) => LAST.map((last) => `${first} ${last}`));
+  const names = Array.from({ length: wanted }, (_, index) => {
+    const base = baseNames[Math.floor(random() * baseNames.length)] ?? `Customer ${index + 1}`;
+    const suffix = index >= baseNames.length ? ` ${Math.floor(index / baseNames.length) + 1}` : "";
+    return `${base}${suffix}`;
+  });
   return {
     merchant_name: SHOP[category][Math.floor(random() * SHOP[category].length)]!,
     area: AREAS[Math.floor(random() * AREAS.length)]!,
@@ -80,6 +82,7 @@ const personaSchema = z.object({
  */
 export async function generatePersona(seed: number, wanted: number): Promise<{ persona: Persona; source: "model" | "template_fallback" }> {
   const fallback = fallbackPersona(seed, wanted);
+  const modelNameCount = Math.min(wanted, 400);
   if (!config.geminiApiKey) return { persona: fallback, source: "template_fallback" };
   try {
     const { default: OpenAI } = await import("openai");
@@ -93,7 +96,7 @@ export async function generatePersona(seed: number, wanted: number): Promise<{ p
         },
         {
           role: "user",
-          content: JSON.stringify({ seed, wanted_customer_names: wanted, categories: Object.keys(CATEGORY_AMOUNTS), city_hint: "Bengaluru or another Indian city" }),
+          content: JSON.stringify({ seed, wanted_customer_names: modelNameCount, categories: Object.keys(CATEGORY_AMOUNTS), city_hint: "Bengaluru or another Indian city" }),
         },
       ],
       response_format: {
@@ -110,7 +113,7 @@ export async function generatePersona(seed: number, wanted: number): Promise<{ p
               area: { type: "string" },
               city: { type: "string" },
               category: { type: "string", enum: Object.keys(CATEGORY_AMOUNTS) },
-              customer_names: { type: "array", items: { type: "string" } },
+              customer_names: { type: "array", items: { type: "string" }, maxItems: 400 },
             },
           },
         },
@@ -133,6 +136,7 @@ export type SynthOptions = {
   asOf: string;
   seed: number;
   customers: number;
+  rows?: number;
   /** Share of customers who were regulars and then went quiet (the audience). */
   absentShare: number;
   persona: Persona;
@@ -170,54 +174,141 @@ export function generateSyntheticCsv(options: SynthOptions): SynthResult {
   const recentWindow = weekdaysBetween(addDays(options.asOf, -inactivityDays + 2), options.asOf);
   const olderWindow = weekdaysBetween(addDays(options.asOf, -lookbackDays - 40), addDays(options.asOf, -lookbackDays - 5));
 
-  const lines: string[] = ["merchant_id,customer_id,customer_name,contact_ref,consent,payment_id,paid_at,amount_minor,status"];
+  const targetRows = Math.min(Math.max(options.rows ?? options.customers * 4, options.customers), 10_000);
+  const lines: string[] = [
+    "merchant_id,customer_id,customer_name,contact_ref,consent,consent_channel,consent_expires_at,customer_segment,loyalty_tier,preferred_channel,language,area,important,importance_note,payment_id,paid_at,amount_minor,currency,payment_method,source_event_id,status",
+  ];
   let paymentSeq = 0;
   const expected = { absent_regulars: 0, consent_false: 0, consent_unknown: 0, no_contact_ref: 0 };
+  type GeneratedCustomer = {
+    id: string;
+    name: string;
+    contact: string;
+    consent: string;
+    consentChannel: string;
+    important: boolean;
+    importanceNote: string;
+    segment: string;
+    tier: string;
+    preferredChannel: string;
+    language: string;
+    area: string;
+  };
+  const customerPools: Record<"quiet_regular" | "active_regular" | "occasional", GeneratedCustomer[]> = {
+    quiet_regular: [],
+    active_regular: [],
+    occasional: [],
+  };
   const stamp = (date: string) => `${date}T${String(8 + Math.floor(random() * 12)).padStart(2, "0")}:${String(Math.floor(random() * 60)).padStart(2, "0")}:00+05:30`;
-  const push = (customer: { id: string; name: string; contact: string; consent: string }, date: string, status = "settled") => {
+  const push = (customer: {
+    id: string;
+    name: string;
+    contact: string;
+    consent: string;
+    consentChannel: string;
+    important: boolean;
+    importanceNote: string;
+    segment: string;
+    tier: string;
+    preferredChannel: string;
+    language: string;
+    area: string;
+  }, date: string, status = "settled") => {
+    if (paymentSeq >= targetRows) return false;
     paymentSeq += 1;
     lines.push(
-      [options.merchantId, customer.id, csvCell(customer.name), customer.contact, customer.consent, `PAY-${String(options.seed % 100000).padStart(5, "0")}-${String(paymentSeq).padStart(5, "0")}`, stamp(date), String(amount()), status].join(","),
+      [
+        options.merchantId,
+        customer.id,
+        csvCell(customer.name),
+        customer.contact,
+        customer.consent,
+        customer.consentChannel,
+        addDays(options.asOf, 90),
+        customer.segment,
+        customer.tier,
+        customer.preferredChannel,
+        customer.language,
+        csvCell(customer.area),
+        customer.important ? "true" : "false",
+        csvCell(customer.importanceNote),
+        `PAY-${String(options.seed % 100000).padStart(5, "0")}-${String(paymentSeq).padStart(5, "0")}`,
+        stamp(date),
+        String(amount()),
+        "INR",
+        ["upi", "card", "cash", "wallet"][Math.floor(random() * 4)],
+        `evt-${String(options.seed)}-${String(paymentSeq).padStart(5, "0")}`,
+        status,
+      ].join(","),
     );
+    return true;
   };
 
   const absentCount = Math.max(2, Math.round(options.customers * options.absentShare));
   const activeCount = Math.round(options.customers * 0.45);
   const casualCount = Math.max(0, options.customers - absentCount - activeCount);
   let index = 0;
-  const nextCustomer = (prefix: string, consent: string, contact: boolean) => {
+  const nextCustomer = (prefix: string, consent: string, contact: boolean, segment: keyof typeof customerPools) => {
     index += 1;
     const name = options.persona.customer_names[(index - 1) % options.persona.customer_names.length] ?? `Customer ${index}`;
-    return {
+    const preferredChannel = random() < 0.6 ? "whatsapp" : "sms";
+    const important = segment === "quiet_regular" && consent === "true" && contact && random() < 0.25;
+    const customer: GeneratedCustomer = {
       id: `${prefix}-${String(index).padStart(3, "0")}`,
       name,
-      contact: contact ? `synthetic-sms:+91-${String(5550 + Math.floor(random() * 40))}-${String(1000 + index)}` : "",
+      contact: contact ? `sandbox-sms:+91-${String(5550 + Math.floor(random() * 40))}-${String(1000 + index)}` : "",
       consent,
+      consentChannel: preferredChannel,
+      important,
+      importanceNote: important ? "Merchant priority candidate" : "",
+      segment,
+      tier: ["standard", "silver", "gold"][Math.floor(random() * 3)]!,
+      preferredChannel,
+      language: ["en", "hi", "kn", "ta"][Math.floor(random() * 4)]!,
+      area: options.persona.area,
     };
+    customerPools[segment].push(customer);
+    return customer;
   };
 
   for (let i = 0; i < absentCount; i += 1) {
     const roll = random();
     const consent = roll < 0.08 ? "false" : roll < 0.16 ? "unknown" : "true";
     const contact = random() > 0.03;
-    const customer = nextCustomer("CUST-A", consent, contact);
+    const customer = nextCustomer("CUST-A", consent, contact, "quiet_regular");
     expected.absent_regulars += 1;
     if (consent === "false") expected.consent_false += 1;
     else if (consent === "unknown") expected.consent_unknown += 1;
     else if (!contact) expected.no_contact_ref += 1;
-    for (const date of pick(absentWindow, 3 + Math.floor(random() * 3))) push(customer, date);
+    for (const date of pick(absentWindow, 3)) push(customer, date);
     if (random() < 0.15) push(customer, addDays(options.asOf, -Math.floor(random() * 10) - 2), random() < 0.5 ? "refunded" : "duplicate");
   }
   for (let i = 0; i < activeCount; i += 1) {
-    const customer = nextCustomer("CUST-B", random() < 0.1 ? "unknown" : "true", true);
-    for (const date of pick(absentWindow, 1 + Math.floor(random() * 3))) push(customer, date);
-    for (const date of pick(recentWindow, 1 + Math.floor(random() * 3))) push(customer, date);
+    const customer = nextCustomer("CUST-B", random() < 0.1 ? "unknown" : "true", true, "active_regular");
+    for (const date of pick(absentWindow, 2)) push(customer, date);
+    for (const date of pick(recentWindow, 2)) push(customer, date);
     if (random() < 0.08) push(customer, addDays(options.asOf, -Math.floor(random() * 14) - 1), "refunded");
   }
   for (let i = 0; i < casualCount; i += 1) {
-    const customer = nextCustomer("CUST-C", random() < 0.2 ? "unknown" : "true", random() > 0.1);
+    const customer = nextCustomer("CUST-C", random() < 0.2 ? "unknown" : "true", random() > 0.1, "occasional");
     const visits = random() < 0.5 ? pick(olderWindow, 1 + Math.floor(random() * 3)) : pick([...absentWindow, ...recentWindow], 1);
     for (const date of visits) push(customer, date);
+  }
+
+  // Fill the requested file size with additional settled events while keeping
+  // each segment's behavior intact. This makes the one-click generator useful
+  // for load testing without changing the eligibility policy.
+  const populations = [
+    { customers: customerPools.quiet_regular, dates: absentWindow },
+    { customers: customerPools.active_regular, dates: recentWindow },
+    { customers: customerPools.occasional, dates: recentWindow },
+  ];
+  let populationIndex = 0;
+  while (paymentSeq < targetRows) {
+    const population = populations[populationIndex % populations.length]!;
+    const customer = population.customers[Math.floor(random() * population.customers.length)]!;
+    push(customer, population.dates[Math.floor(random() * population.dates.length)] ?? options.asOf);
+    populationIndex += 1;
   }
 
   return { csv: lines.join("\n"), rows: lines.length - 1, customers: index, expected };
@@ -235,14 +326,16 @@ export function asOfFor(ctx: MerchantContext): string {
 export async function generateAndImport(
   db: Db,
   ctx: MerchantContext,
-  input: { seed?: number; customers?: number; absentShare?: number; replace?: boolean; requestId?: string },
+  input: { seed?: number; customers?: number; rows?: number; absentShare?: number; replace?: boolean; requestId?: string },
 ) {
   const seed = input.seed ?? Math.floor(Math.random() * 2_147_483_647);
-  const customers = Math.min(Math.max(input.customers ?? 60 + Math.floor(makeRandom(seed)() * 80), 20), 400);
+  const rows = Math.min(Math.max(input.rows ?? (input.customers ?? 400) * 4, 100), 10_000);
+  const requestedCustomers = input.customers ?? Math.floor(rows / 5);
+  const customers = Math.min(Math.max(requestedCustomers, 20), 2_500, Math.max(20, Math.floor(rows / 4)));
   const absentShare = Math.min(Math.max(input.absentShare ?? 0.25 + makeRandom(seed + 1)() * 0.15, 0.1), 0.5);
-  const { persona, source } = await generatePersona(seed, customers);
+  const { persona, source } = await generatePersona(seed, Math.min(customers, 400));
   const asOf = asOfFor(ctx);
-  const generated = generateSyntheticCsv({ merchantId: ctx.merchantId, asOf, seed, customers, absentShare, persona });
+  const generated = generateSyntheticCsv({ merchantId: ctx.merchantId, asOf, seed, customers, rows, absentShare, persona: { ...persona, customer_names: fallbackPersona(seed ^ 17, customers).customer_names } });
 
   if (input.replace) await resetDemoData(db, ctx.merchantId);
   const result = await importCsv(db, ctx, { content: generated.csv, sourceName: `scenario-${seed}.csv`, requestId: input.requestId });
@@ -257,7 +350,7 @@ export async function generateAndImport(
   await rememberFact(db, {
     merchantId: ctx.merchantId,
     kind: "dataset",
-    fact: `Loaded a synthetic ${persona.category.replace("_", " ")} dataset for ${persona.merchant_name} (${persona.area}, ${persona.city}): ${generated.customers} customers, ${generated.rows} payments, seed ${seed}.`,
+    fact: `Loaded a ${persona.category.replace("_", " ")} dataset for ${persona.merchant_name} (${persona.area}, ${persona.city}): ${generated.customers} customers, ${generated.rows} payments, scenario ${seed}.`,
     details: { seed, category: persona.category, customers: generated.customers, rows: generated.rows, persona_source: source },
     source: source === "model" ? "model_persona" : "rules",
   });

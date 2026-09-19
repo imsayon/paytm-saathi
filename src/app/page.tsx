@@ -49,7 +49,8 @@ export default function ImportPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [syntheticSeed, setSyntheticSeed] = useState("20260919");
-  const [syntheticCustomers, setSyntheticCustomers] = useState("90");
+  const [syntheticRows, setSyntheticRows] = useState("10000");
+  const [syntheticCustomers, setSyntheticCustomers] = useState("2000");
   const [syntheticAbsentShare, setSyntheticAbsentShare] = useState("30");
   const hero = useRef<HTMLDivElement>(null);
 
@@ -143,6 +144,7 @@ export default function ImportPage() {
     setFlash(null);
     try {
       const seed = Number.parseInt(syntheticSeed, 10);
+      const rows = Number.parseInt(syntheticRows, 10);
       const customers = Number.parseInt(syntheticCustomers, 10);
       const absentShare = Number.parseInt(syntheticAbsentShare, 10) / 100;
       const result = await apiCall<{
@@ -152,9 +154,9 @@ export default function ImportPage() {
           persona: { merchant_name?: string; area?: string; city?: string; category?: string };
           import: { rowCount?: number; row_count?: number; customerCount?: number; customer_count?: number };
         };
-      }>("/api/synthetic/generate", {
+      }>("/api/datasets/generate", {
         method: "POST",
-        body: JSON.stringify({ seed, customers, absent_share: absentShare, replace: true }),
+        body: JSON.stringify({ seed, rows, customers, absent_share: absentShare, replace: true }),
       });
       const persona = result.synthetic.persona;
       const rowCount = result.synthetic.import.rowCount ?? result.synthetic.import.row_count ?? 0;
@@ -279,27 +281,30 @@ export default function ImportPage() {
         </TiltCard>
       </div>
 
-      {overview.demo.demo_mode ? (
-        <div className="grid two" style={{ marginTop: 16 }}>
+      <div className="grid two" style={{ marginTop: 16 }}>
           <TiltCard className="card" data-reveal>
             <div className="page-head" style={{ marginBottom: 8 }}>
               <div>
-                <div className="eyebrow" style={{ marginBottom: 4 }}><span className="blink" /> Preview tools</div>
-                <h2 style={{ margin: 0 }}>Try another sample</h2>
+                <div className="eyebrow" style={{ marginBottom: 4 }}><span className="blink" /> Data generator</div>
+                <h2 style={{ margin: 0 }}>Generate payment data</h2>
               </div>
-              <span className="pill info plain">Preview</span>
+              <span className="pill info plain">Up to 10,000 rows</span>
             </div>
             <p className="tiny muted" style={{ marginTop: 0 }}>
-              Explore a different customer mix to see how the workspace responds.
+              Build a fresh payment file, load it into this workspace, and review the customers it surfaces.
             </p>
             <div className="two-col">
               <div className="field">
-                <label htmlFor="synthetic-seed">Sample key</label>
+                <label htmlFor="synthetic-seed">Scenario key</label>
                 <input id="synthetic-seed" type="number" min="1" max="2147483647" value={syntheticSeed} onChange={(event) => setSyntheticSeed(event.target.value)} />
               </div>
               <div className="field">
+                <label htmlFor="synthetic-rows">Payment rows</label>
+                <input id="synthetic-rows" type="number" min="100" max="10000" value={syntheticRows} onChange={(event) => setSyntheticRows(event.target.value)} />
+              </div>
+              <div className="field">
                 <label htmlFor="synthetic-customers">Customers</label>
-                <input id="synthetic-customers" type="number" min="20" max="400" value={syntheticCustomers} onChange={(event) => setSyntheticCustomers(event.target.value)} />
+                <input id="synthetic-customers" type="number" min="20" max="2500" value={syntheticCustomers} onChange={(event) => setSyntheticCustomers(event.target.value)} />
               </div>
               <div className="field">
                 <label htmlFor="synthetic-absent-share">Quiet regulars (%)</label>
@@ -308,7 +313,7 @@ export default function ImportPage() {
             </div>
             <div className="actions" style={{ marginTop: 14 }}>
               <button onClick={generateSynthetic} disabled={busy !== null}>
-                {busy === "synthetic" ? <span className="spinner" /> : <Icon name="spark" size={15} />} Build sample
+                {busy === "synthetic" ? <span className="spinner" /> : <Icon name="spark" size={15} />} Generate dataset
               </button>
               <button className="ghost small" onClick={randomizeSyntheticSeed} disabled={busy !== null}>
                 <Icon name="refresh" size={14} /> New key
@@ -317,10 +322,10 @@ export default function ImportPage() {
           </TiltCard>
 
           <TiltCard className="card" data-reveal>
-            <h3>Preview data</h3>
+            <h3>Current dataset</h3>
             {overview.latest_synthetic ? (
               <>
-                <h2>{overview.latest_synthetic.persona.merchant_name ?? "Sample merchant"}</h2>
+                <h2>{overview.latest_synthetic.persona.merchant_name ?? "Current merchant"}</h2>
                 <p className="tiny muted" style={{ marginTop: 4 }}>
                   {overview.latest_synthetic.persona.area ?? "Neighbourhood"}, {overview.latest_synthetic.persona.city ?? "India"}
                 </p>
@@ -328,9 +333,9 @@ export default function ImportPage() {
                 <div className="kv"><span className="key">Payments</span><span className="value">{overview.latest_synthetic.row_count}</span></div>
               </>
             ) : (
-              <p className="muted">Load a sample to explore the workspace.</p>
+              <p className="muted">Generate or upload payment data to populate this workspace.</p>
             )}
-            {overview.last_import || overview.campaigns.length > 0 ? (
+            {overview.demo.demo_mode && (overview.last_import || overview.campaigns.length > 0) ? (
               <div className="actions" style={{ marginTop: 14 }}>
                 <button className="secondary small" onClick={resetDemo} disabled={busy !== null}>
                   {busy === "reset" ? <span className="spinner" /> : <Icon name="refresh" size={14} />}
@@ -340,7 +345,6 @@ export default function ImportPage() {
             ) : null}
           </TiltCard>
         </div>
-      ) : null}
 
       {signal ? (
         <>

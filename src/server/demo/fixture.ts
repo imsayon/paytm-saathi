@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DEMO_MERCHANT_ID, DEMO_MERCHANT_NAME } from "../auth/context";
+import { config } from "../config";
 import type { Db } from "../db/client";
 
 export const FIXTURE_PATH = path.join(process.cwd(), "data", "fixtures", "saathi-demo.csv");
@@ -10,6 +11,7 @@ export const DEMO_INTENT = "Bring back my weekday regulars. Keep the reward budg
 export const DEMO_BUDGET_CAP_MINOR = 30_000;
 
 export async function seedMerchant(db: Db): Promise<void> {
+  if (!config.demoMode) return;
   await db.run(
     `INSERT INTO merchant (id, name, timezone, default_cap_minor, created_at)
      VALUES ($1, $2, 'Asia/Kolkata', $3, $4)

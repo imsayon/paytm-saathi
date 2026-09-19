@@ -23,7 +23,7 @@ test("the full demo path runs from import to holdout report", async ({ page }) =
 
   // 3. Inspect the audience and its exclusions.
   await page.getByRole("link", { name: "Review customers" }).first().click();
-  await expect(page.getByRole("heading", { name: "Meet your next customers." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose your important customers." })).toBeVisible();
   await expect(page.getByText("Customers to review (20)")).toBeVisible();
   await expect(page.getByText("Not included (4)")).toBeVisible();
   await expect(page.locator(".split-label")).toContainText("Campaign 10");
@@ -31,7 +31,7 @@ test("the full demo path runs from import to holdout report", async ({ page }) =
 
   // 4. Submit the merchant intent.
   await expect(page.locator("#intent")).toHaveValue(/weekday regulars/);
-  await page.getByRole("button", { name: "Draft a campaign" }).click();
+  await page.getByRole("button", { name: "Save shortlist & draft" }).click();
 
   // 5. The intentional rule boundary: ₹25 x 20 = ₹500 against a ₹300 cap.
   await expect(page.getByText("Rules blocked this plan.")).toBeVisible();

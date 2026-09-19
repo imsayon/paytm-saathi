@@ -24,6 +24,15 @@ test("generated files pass the importer's own validation with unique payment ids
   assert.ok(parsed.rows.some((r) => r.status === "refunded" || r.status === "duplicate"), "the mix includes non-visits");
 });
 
+test("the generator can produce the 10,000-row workspace limit without adding customers", () => {
+  const persona = fallbackPersona(19, 2_000);
+  const generated = generateSyntheticCsv({ merchantId: "m", asOf: "2026-09-01", seed: 19, customers: 2_000, rows: 10_000, absentShare: 0.3, persona });
+  const parsed = parseCsv(generated.csv, { maxRows: 10_000 });
+  assert.equal(generated.rows, 10_000);
+  assert.equal(parsed.rows.length, 10_000);
+  assert.equal(new Set(parsed.rows.map((row) => row.customerId)).size, 2_000);
+});
+
 test("the persona fallback is deterministic and never invents contact details", () => {
   const p1 = fallbackPersona(3, 30);
   const p2 = fallbackPersona(3, 30);

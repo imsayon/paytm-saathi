@@ -84,8 +84,8 @@ export function loadConfig(): AppConfig {
     n8nSecret: nonEmpty(process.env.N8N_WEBHOOK_SECRET),
     cogneeBaseUrl: nonEmpty(process.env.COGNEE_BASE_URL)?.replace(/\/+$/, "") ?? null,
     cogneeApiKey: nonEmpty(process.env.COGNEE_API_KEY),
-    maxImportBytes: 2 * 1024 * 1024,
-    maxImportRows: 20000,
+    maxImportBytes: 12 * 1024 * 1024,
+    maxImportRows: 10_000,
     policyVersion: "retention-v1",
   };
 }

@@ -5,6 +5,7 @@ import { assertOwnedByMerchant } from "../auth/context";
 import { newId, type Db } from "../db/client";
 import { AppError } from "../errors";
 import { rememberFact } from "../memory/store";
+import { describeDeliveryProvider } from "../providers";
 import { validateProposal, type Proposal, type RuleResult } from "./rules";
 import { computeSignal, stableHash, type SignalSummary } from "./signal";
 
@@ -45,6 +46,7 @@ export type VersionRow = {
   cap_minor: number;
   policy_version: string;
   ai_source: "model" | "template_fallback";
+  selected_customer_ids: string[];
   created_by: string;
   created_at: string;
 };
@@ -99,6 +101,12 @@ export function listRecipients(db: Db, versionId: string): Promise<RecipientRow[
   );
 }
 
+export function selectedIdsForVersion(version: VersionRow): string[] | undefined {
+  return Array.isArray(version.selected_customer_ids) && version.selected_customer_ids.length > 0
+    ? version.selected_customer_ids
+    : undefined;
+}
+
 /**
  * Assignment is computed once per version and then stored. Nothing downstream
  * recomputes it, so a later import or re-sort cannot move a customer between
@@ -133,8 +141,8 @@ async function writeVersion(
 
   await tx.run(
     `INSERT INTO campaign_version
-       (id, campaign_id, merchant_id, version, proposal, rule_result, cohort_hash, cap_minor, policy_version, ai_source, created_by, created_at)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12)`,
+       (id, campaign_id, merchant_id, version, proposal, rule_result, cohort_hash, cap_minor, policy_version, ai_source, selected_customer_ids, created_by, created_at)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11::jsonb, $12, $13)`,
     [
       versionId,
       input.campaignId,
@@ -146,6 +154,7 @@ async function writeVersion(
       input.capMinor,
       input.signal.policy.version,
       input.aiSource,
+      JSON.stringify(input.signal.eligible.map((customer) => customer.customerId)),
       input.ctx.actor,
       now,
     ],
@@ -183,11 +192,20 @@ export type PreviewInput = {
   proposal: Proposal;
   aiSource: "model" | "template_fallback";
   fallbackReason: string | null;
+  selectedCustomerIds?: readonly string[];
   requestId?: string;
 };
 
 export async function createCampaignPreview(db: Db, ctx: MerchantContext, input: PreviewInput) {
-  const signal = await computeSignal(db, ctx.merchantId, input.asOf);
+  const allCandidates = await computeSignal(db, ctx.merchantId, input.asOf);
+  const selectedCustomerIds = input.selectedCustomerIds?.length
+    ? [...new Set(input.selectedCustomerIds)]
+    : allCandidates.eligible.map((customer) => customer.customerId);
+  const signal = await computeSignal(db, ctx.merchantId, input.asOf, { selectedCustomerIds });
+  const unknownSelection = selectedCustomerIds.filter((id) => !allCandidates.eligible.some((customer) => customer.customerId === id));
+  if (unknownSelection.length > 0) {
+    throw new AppError("RULE_VIOLATION", "The shortlist contains customers who are not currently eligible. Refresh the customer list and try again.");
+  }
   const ruleResult = validateProposal({
     proposal: input.proposal,
     signal,
@@ -263,7 +281,8 @@ export async function reviseCampaign(db: Db, ctx: MerchantContext, input: Revise
     throw new AppError("RULE_VIOLATION", `A ${existing.status} campaign cannot be revised.`);
   }
 
-  const signal = await computeSignal(db, ctx.merchantId, existing.as_of);
+  const previousVersion = await loadVersion(db, existing.id, existing.current_version);
+  const signal = await computeSignal(db, ctx.merchantId, existing.as_of, { selectedCustomerIds: selectedIdsForVersion(previousVersion) });
   const ruleResult = validateProposal({
     proposal: input.proposal,
     signal,
@@ -428,7 +447,7 @@ export async function approveCampaign(db: Db, ctx: MerchantContext, input: Appro
 
     // Re-run the same rules against fresh data: consent or eligibility may have
     // changed between preview and approval.
-    const signal = await computeSignal(tx, ctx.merchantId, campaign.as_of);
+    const signal = await computeSignal(tx, ctx.merchantId, campaign.as_of, { selectedCustomerIds: selectedIdsForVersion(version) });
     const proposal = version.proposal;
     const ruleResult = validateProposal({ proposal, signal, budgetCapMinor: version.cap_minor });
 
@@ -524,7 +543,7 @@ export async function approveCampaign(db: Db, ctx: MerchantContext, input: Appro
       details: {
         jobs_queued: ordered.length,
         holdout_size: recipients.length - campaignGroup.length,
-        provider: "mock",
+        provider: describeDeliveryProvider().name,
         note: "No provider call happens in this transaction.",
       },
     });

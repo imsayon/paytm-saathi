@@ -13,7 +13,8 @@ export const dynamic = "force-dynamic";
 const schema = z
   .object({
     seed: z.number().int().min(1).max(2_147_483_647).optional(),
-    customers: z.number().int().min(20).max(400).optional(),
+    customers: z.number().int().min(20).max(2_500).optional(),
+    rows: z.number().int().min(100).max(10_000).optional(),
     absent_share: z.number().min(0.1).max(0.5).optional(),
     replace: z.boolean().optional(),
   })
@@ -30,6 +31,7 @@ export async function POST(request: Request) {
     const generated = await generateAndImport(db, ctx, {
       seed: body.seed,
       customers: body.customers,
+      rows: body.rows,
       absentShare: body.absent_share,
       replace: body.replace ?? true,
       requestId,

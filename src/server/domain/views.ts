@@ -2,7 +2,7 @@ import { listAudit } from "../audit/events";
 import { describeDeliveryProvider } from "../providers";
 import type { MerchantContext } from "../auth/context";
 import type { Db } from "../db/client";
-import { listRecipients, loadCampaign, loadVersion, type CampaignRow, type VersionRow } from "./campaign";
+import { listRecipients, loadCampaign, loadVersion, selectedIdsForVersion, type CampaignRow, type VersionRow } from "./campaign";
 import { buildReport, type MeasurementReport } from "./measurement";
 import { compareOffers, rewardPromise, validateProposal, type Proposal, type RuleResult } from "./rules";
 import { computeSignal, type CustomerSignal, type SignalSummary } from "./signal";
@@ -14,7 +14,10 @@ export function maskCustomer(externalId: string): string {
 }
 
 export type CustomerView = {
+  selection_id: string;
+  display_name: string;
   customer_ref: string;
+  is_important: boolean;
   consent: CustomerSignal["consent"];
   settled_visits: number;
   distinct_dates: number;
@@ -27,7 +30,10 @@ export type CustomerView = {
 
 export function toCustomerView(signal: CustomerSignal): CustomerView {
   return {
+    selection_id: signal.customerId,
+    display_name: signal.displayName,
     customer_ref: maskCustomer(signal.externalId),
+    is_important: signal.isImportant,
     consent: signal.consent,
     settled_visits: signal.settledVisits,
     distinct_dates: signal.distinctDates,
@@ -49,6 +55,7 @@ export function signalView(signal: SignalSummary) {
     eligible_count: signal.eligibleCount,
     cohort_hash: signal.cohortHash,
     excluded: signal.excluded,
+    selection_mode: signal.excluded.not_selected > 0 ? "merchant_shortlist" : "all_candidates",
     absent_customers: signal.absent.map(toCustomerView),
   };
 }
@@ -159,7 +166,7 @@ export async function buildCampaignDetail(db: Db, ctx: MerchantContext, campaign
 
   const [recipients, signal, customers, approval, jobs, report, audit] = await Promise.all([
     listRecipients(db, version.id),
-    computeSignal(db, ctx.merchantId, campaign.as_of),
+    computeSignal(db, ctx.merchantId, campaign.as_of, { selectedCustomerIds: selectedIdsForVersion(version) }),
     db.all<{ id: string; external_id: string }>(`SELECT id, external_id FROM customer WHERE merchant_id = $1`, [
       ctx.merchantId,
     ]),

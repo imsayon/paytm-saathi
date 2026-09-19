@@ -6,7 +6,10 @@ import { Reveal, SplitMeter, SplitText, TiltCard } from "@/components/motion";
 import { apiCall, ErrorBanner, Icon, InitialLoad, rupees, Stat } from "@/components/ui";
 
 type CustomerView = {
+  selection_id: string;
+  display_name: string;
   customer_ref: string;
+  is_important: boolean;
   consent: string;
   settled_visits: number;
   distinct_dates: number;
@@ -33,7 +36,8 @@ type Overview = {
     regular_customers: number;
     absent_regulars: number;
     eligible_count: number;
-    excluded: { consent_false: number; consent_unknown: number; no_contact_ref: number; over_cohort_cap: number };
+    excluded: { consent_false: number; consent_unknown: number; no_contact_ref: number; over_cohort_cap: number; not_selected: number };
+    selection_mode: string;
     absent_customers: CustomerView[];
   } | null;
 };
@@ -43,6 +47,7 @@ const REASON_LABEL: Record<string, string> = {
   consent_unknown: "Consent unknown",
   no_contact_ref: "No contact reference",
   over_cohort_cap: "Over cohort cap",
+  not_selected: "Not on merchant shortlist",
 };
 
 export default function SignalsPage() {
@@ -52,6 +57,7 @@ export default function SignalsPage() {
   const [intent, setIntent] = useState("");
   const [capRupees, setCapRupees] = useState("300");
   const [busy, setBusy] = useState(false);
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setError(null);
@@ -60,6 +66,11 @@ export default function SignalsPage() {
       setOverview(data);
       setIntent((current) => current || data.demo.suggested_intent);
       setCapRupees(String(data.demo.suggested_budget_cap_minor / 100));
+      if (data.signal) {
+        const candidates = data.signal.absent_customers.filter((customer) => customer.eligible);
+        const marked = candidates.filter((customer) => customer.is_important);
+        setSelectedCustomerIds(new Set((marked.length > 0 ? marked : candidates).map((customer) => customer.selection_id)));
+      }
     } catch (caught) {
       setError(caught as Error);
     }
@@ -73,10 +84,20 @@ export default function SignalsPage() {
     setBusy(true);
     setError(null);
     try {
+      const selected = signal?.absent_customers
+        .filter((customer) => customer.eligible && selectedCustomerIds.has(customer.selection_id))
+        .map((customer) => customer.selection_id) ?? [];
+      if (selected.length < 2) {
+        throw Object.assign(new Error("Choose at least two important customers before drafting a campaign."), { details: undefined });
+      }
+      await apiCall("/api/customers/importance", {
+        method: "PUT",
+        body: JSON.stringify({ customer_ids: selected }),
+      });
       const capMinor = Math.round(Number(capRupees) * 100);
       const result = await apiCall<{ campaign: { id: string } }>("/api/campaigns/preview", {
         method: "POST",
-        body: JSON.stringify({ intent, budget_cap_minor: capMinor }),
+        body: JSON.stringify({ intent, budget_cap_minor: capMinor, selected_customer_ids: selected }),
       });
       router.push(`/campaigns/${result.campaign.id}/review`);
     } catch (caught) {
@@ -103,8 +124,9 @@ export default function SignalsPage() {
 
   const eligible = signal.absent_customers.filter((customer) => customer.eligible);
   const excluded = signal.absent_customers.filter((customer) => !customer.eligible);
-  const campaignSize = Math.floor(eligible.length / 2);
-  const holdoutSize = eligible.length - campaignSize;
+  const selected = eligible.filter((customer) => selectedCustomerIds.has(customer.selection_id));
+  const campaignSize = Math.floor(selected.length / 2);
+  const holdoutSize = selected.length - campaignSize;
   const capMinor = Math.round(Number(capRupees) * 100) || 0;
 
   return (
@@ -114,11 +136,11 @@ export default function SignalsPage() {
           <span className="blink" /> Customer activity
         </div>
         <h1>
-          <SplitText text="Meet" accent="your next customers." />
+          <SplitText text="Choose" accent="your important customers." />
         </h1>
         <p className="lede">
-          These customers used to visit regularly and have been away for a while. Review the list, choose an offer, and decide what
-          feels right for your shop.
+          Saathi surfaces customers who used to visit regularly and have gone quiet. You decide which relationships matter most before
+          the campaign is drafted.
         </p>
       </div>
 
@@ -126,7 +148,7 @@ export default function SignalsPage() {
         <Stat value={signal.regular_customers} label={`Regular customers`} tone="info" />
         <Stat value={signal.absent_regulars} label="Quiet regulars" tone="warn" />
         <Stat value={signal.excluded.consent_false + signal.excluded.consent_unknown} label="Left out" tone="bad" />
-        <Stat value={signal.eligible_count} label="Ready to review" tone="ok" />
+        <Stat value={selected.length} label="On your shortlist" tone="ok" />
       </div>
 
       <div className="grid two">
@@ -174,14 +196,14 @@ export default function SignalsPage() {
           </div>
           <SplitMeter campaign={campaignSize} holdout={holdoutSize} />
           <p className="tiny muted">
-            Half of the list is kept aside so you can compare what happened with and without the offer.
+            Your shortlist is split into a campaign group and an untouched holdout so you can compare what happened.
           </p>
           <div className="field" style={{ marginTop: 14 }}>
             <label htmlFor="intent">What would you like to say?</label>
             <textarea id="intent" value={intent} onChange={(event) => setIntent(event.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="cap">Maximum reward per customer (₹)</label>
+              <label htmlFor="cap">Total reward budget (₹)</label>
             <input id="cap" type="number" min="1" step="1" value={capRupees} onChange={(event) => setCapRupees(event.target.value)} />
             <p className="help">
               Your maximum spend is {rupees(capMinor)}
@@ -189,11 +211,11 @@ export default function SignalsPage() {
             </p>
           </div>
           <div className="actions" style={{ marginTop: 14 }}>
-            <button onClick={createProposal} disabled={busy || eligible.length === 0}>
+            <button onClick={createProposal} disabled={busy || selected.length < 2}>
               {busy ? <span className="spinner" /> : <Icon name="pen" size={16} />}
-              Draft a campaign
+              Save shortlist & draft
             </button>
-            <span className="tiny muted">You will review the message before anything is sent.</span>
+            <span className="tiny muted">{selected.length} selected · you review the message before anything is sent.</span>
           </div>
           <div style={{ marginTop: 12 }}>
             <ErrorBanner error={error} />
@@ -202,11 +224,18 @@ export default function SignalsPage() {
       </div>
 
       <div className="card" data-reveal>
-        <h3>Customers to review ({eligible.length})</h3>
+        <div className="page-head" style={{ marginBottom: 8 }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Customers to review ({eligible.length})</h3>
+            <p className="tiny muted" style={{ margin: "4px 0 0" }}>Select the customers you consider important for this campaign.</p>
+          </div>
+          <span className="pill info plain">{selected.length} selected</span>
+        </div>
         <div className="scroll">
           <table>
             <thead>
               <tr>
+                <th>Select</th>
                 <th>Customer</th>
                 <th className="num">Settled visits</th>
                 <th className="num">Distinct dates</th>
@@ -219,7 +248,24 @@ export default function SignalsPage() {
               {eligible.map((customer, index) => (
                 <tr key={`${customer.customer_ref}-${index}`}>
                   <td>
-                    <code>{customer.customer_ref}</code>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${customer.display_name}`}
+                      checked={selectedCustomerIds.has(customer.selection_id)}
+                      onChange={() => {
+                        setSelectedCustomerIds((current) => {
+                          const next = new Set(current);
+                          if (next.has(customer.selection_id)) next.delete(customer.selection_id);
+                          else next.add(customer.selection_id);
+                          return next;
+                        });
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <strong>{customer.display_name}</strong>
+                    <div><code>{customer.customer_ref}</code></div>
+                    {customer.is_important ? <span className="pill ok plain tiny">Important</span> : null}
                   </td>
                   <td className="num">{customer.settled_visits}</td>
                   <td className="num">{customer.distinct_dates}</td>
@@ -231,7 +277,7 @@ export default function SignalsPage() {
             </tbody>
           </table>
         </div>
-        <p className="note">Only customers who have given permission are shown here.</p>
+        <p className="note">Consent and contactability remain hard gates. Your shortlist chooses priority; it cannot bypass policy.</p>
       </div>
 
       <div className="card" data-reveal>

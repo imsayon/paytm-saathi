@@ -23,6 +23,20 @@ test("a well-formed row parses into typed values", () => {
   assert.equal(result.rows[0]!.consent, "true");
 });
 
+test("optional customer fields are normalized into the profile and shortlist metadata", () => {
+  const content = [
+    "merchant_id,customer_id,customer_name,contact_ref,consent,consent_channel,consent_expires_at,customer_segment,loyalty_tier,important,importance_note,payment_id,paid_at,amount_minor,status",
+    "m1,c1,Ananya Rao,sms:+919999999999,true,whatsapp,2026-12-31,regular,gold,true,Frequent weekday visitor,PAY-1,2026-07-14T10:30:00+05:30,20000,settled",
+  ].join("\n");
+  const result = parseCsv(content, OPTIONS);
+  const row = result.rows[0]!;
+  assert.equal(row.isImportant, true);
+  assert.equal(row.importanceNote, "Frequent weekday visitor");
+  assert.equal(row.consentChannel, "whatsapp");
+  assert.equal(row.customerProfile.customer_segment, "regular");
+  assert.equal(row.customerProfile.loyalty_tier, "gold");
+});
+
 test("missing required columns are reported by name", () => {
   assert.throws(
     () => parseCsv("merchant_id,customer_id\nm1,c1", OPTIONS),

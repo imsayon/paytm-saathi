@@ -54,7 +54,7 @@ services:
       # Optional. Without it the planner uses the labelled template fallback.
       - key: GEMINI_API_KEY
         sync: false
-      # Delivery stays on the mock unless you flip this and add the Twilio secrets.
+      # Switch to twilio after adding the account credentials below.
       - key: SAATHI_DELIVERY_PROVIDER
         value: mock
       - key: TWILIO_ACCOUNT_SID
@@ -62,6 +62,10 @@ services:
       - key: TWILIO_AUTH_TOKEN
         sync: false
       - key: TWILIO_FROM
+        sync: false
+      - key: TWILIO_SEND_WAIT_MS
+        value: "8000"
+      - key: TWILIO_TEST_TO
         sync: false
       # Set to the service's public URL so Twilio status callbacks can be verified.
       - key: PUBLIC_BASE_URL

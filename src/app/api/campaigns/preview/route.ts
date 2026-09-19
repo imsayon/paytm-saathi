@@ -19,6 +19,7 @@ const previewSchema = z.object({
   intent: z.string().trim().min(5).max(500),
   budget_cap_minor: z.number().int().positive().max(2_147_483_647).optional(),
   as_of: z.string().refine(isValidDateString, "Use a valid YYYY-MM-DD date").optional(),
+  selected_customer_ids: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
 }).strict();
 
 export async function POST(request: Request) {
@@ -48,7 +49,10 @@ export async function POST(request: Request) {
       throw new AppError("RULE_VIOLATION", "Import payment data before creating a campaign.");
     }
 
-    const signal = await computeSignal(db, ctx.merchantId, asOf);
+    const allCandidates = await computeSignal(db, ctx.merchantId, asOf);
+    const signal = body.selected_customer_ids?.length
+      ? await computeSignal(db, ctx.merchantId, asOf, { selectedCustomerIds: body.selected_customer_ids })
+      : allCandidates;
     const plannerInput = buildPlannerInput({ intent, signal, budgetCapMinor, timezone: ctx.timezone, memory: await recallFacts(db, ctx.merchantId) });
     const planner = await runPlanner(plannerInput);
 
@@ -59,6 +63,7 @@ export async function POST(request: Request) {
       proposal: planner.proposal,
       aiSource: planner.source,
       fallbackReason: planner.fallbackReason,
+      selectedCustomerIds: body.selected_customer_ids,
       requestId,
     });
 

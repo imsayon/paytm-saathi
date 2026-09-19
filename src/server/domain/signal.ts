@@ -15,6 +15,7 @@ export type CustomerSignal = {
   customerId: string;
   externalId: string;
   displayName: string;
+  isImportant: boolean;
   hasContactRef: boolean;
   consent: "true" | "false" | "unknown";
   settledVisits: number;
@@ -42,6 +43,7 @@ export type SignalSummary = {
     consent_unknown: number;
     no_contact_ref: number;
     over_cohort_cap: number;
+    not_selected: number;
   };
   eligible: CustomerSignal[];
   absent: CustomerSignal[];
@@ -58,6 +60,7 @@ type CustomerRow = {
   external_id: string;
   display_name: string;
   contact_ref: string | null;
+  is_important: boolean;
 };
 
 /** Deterministic ordering key so campaign/holdout assignment never depends on row order. */
@@ -84,13 +87,18 @@ async function latestConsentByCustomer(
   return latest;
 }
 
-export async function computeSignal(db: Db, merchantId: string, asOf: string): Promise<SignalSummary> {
+export async function computeSignal(
+  db: Db,
+  merchantId: string,
+  asOf: string,
+  options: { selectedCustomerIds?: readonly string[] } = {},
+): Promise<SignalSummary> {
   const windowStart = addDays(asOf, -RETENTION_POLICY.lookbackDays);
   const inactivityStart = addDays(asOf, -RETENTION_POLICY.inactivityDays);
 
   const [customers, payments, consentByCustomer] = await Promise.all([
     db.all<CustomerRow>(
-      `SELECT id, external_id, display_name, contact_ref FROM customer WHERE merchant_id = $1 ORDER BY external_id`,
+      `SELECT id, external_id, display_name, contact_ref, is_important FROM customer WHERE merchant_id = $1 ORDER BY external_id`,
       [merchantId],
     ),
     db.all<PaymentRow>(
@@ -132,6 +140,7 @@ export async function computeSignal(db: Db, merchantId: string, asOf: string): P
       customerId: customer.id,
       externalId: customer.external_id,
       displayName: customer.display_name,
+      isImportant: customer.is_important,
       hasContactRef,
       consent,
       settledVisits: visits.length,
@@ -151,6 +160,16 @@ export async function computeSignal(db: Db, merchantId: string, asOf: string): P
       exclusionReason,
     };
   });
+
+  const selectedSet = options.selectedCustomerIds ? new Set(options.selectedCustomerIds) : null;
+  if (selectedSet) {
+    for (const customer of signals) {
+      if (customer.eligible && !selectedSet.has(customer.customerId)) {
+        customer.eligible = false;
+        customer.exclusionReason = "not_selected";
+      }
+    }
+  }
 
   const absent = signals
     .filter((signal) => signal.isRegular && signal.isAbsent)
@@ -177,6 +196,7 @@ export async function computeSignal(db: Db, merchantId: string, asOf: string): P
       consent_unknown: absent.filter((signal) => signal.exclusionReason === "consent_unknown").length,
       no_contact_ref: absent.filter((signal) => signal.exclusionReason === "no_contact_ref").length,
       over_cohort_cap: overCap,
+      not_selected: absent.filter((signal) => signal.exclusionReason === "not_selected").length,
     },
     eligible,
     absent,
