@@ -12,6 +12,16 @@ export type AppConfig = {
   demoMode: boolean;
   geminiApiKey: string | null;
   geminiModel: string;
+  /** "mock" (default) or "twilio". Anything else is refused at startup. */
+  deliveryProvider: "mock" | "twilio";
+  twilioAccountSid: string | null;
+  twilioAuthToken: string | null;
+  /** E.164 number or `whatsapp:+E164`; the sender Twilio shows the customer. */
+  twilioFrom: string | null;
+  /** How long a send waits for a terminal Twilio status before reporting a timeout. */
+  twilioSendWaitMs: number;
+  /** Public origin of this deployment, used to sign and verify provider webhooks. */
+  publicBaseUrl: string | null;
   maxImportBytes: number;
   maxImportRows: number;
   policyVersion: string;
@@ -50,6 +60,12 @@ export function loadConfig(): AppConfig {
     demoMode: readBool(process.env.SAATHI_DEMO_MODE, true),
     geminiApiKey: nonEmpty(process.env.GEMINI_API_KEY),
     geminiModel: process.env.SAATHI_GEMINI_MODEL ?? "gemini-2.5-flash",
+    deliveryProvider: process.env.SAATHI_DELIVERY_PROVIDER?.trim().toLowerCase() === "twilio" ? "twilio" : "mock",
+    twilioAccountSid: nonEmpty(process.env.TWILIO_ACCOUNT_SID),
+    twilioAuthToken: nonEmpty(process.env.TWILIO_AUTH_TOKEN),
+    twilioFrom: nonEmpty(process.env.TWILIO_FROM),
+    twilioSendWaitMs: Number.parseInt(process.env.TWILIO_SEND_WAIT_MS ?? "8000", 10) || 8000,
+    publicBaseUrl: nonEmpty(process.env.PUBLIC_BASE_URL)?.replace(/\/+$/, "") ?? null,
     maxImportBytes: 2 * 1024 * 1024,
     maxImportRows: 20000,
     policyVersion: "retention-v1",

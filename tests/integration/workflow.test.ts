@@ -340,6 +340,6 @@ test("computed comparisons are read-only; choosing a reward requires a fresh app
   assert.match(final.reward_promise,/₹15.00/);
   const { drainQueue } = await import('../../src/server/worker/runner');
   let sent=0;
-  await drainQueue(db,{provider:{name:'capture',async send(message){sent++;assert.ok(message.body.endsWith(final.reward_promise));return {outcome:'delivered',providerMessageId:'captured',raw:'ok'};},async getStatus(){return {state:'unavailable',raw:'unknown'};}}});
+  await drainQueue(db,{provider:{name:'capture',live:false,async send(message){sent++;assert.ok(message.body.endsWith(final.reward_promise));return {outcome:'delivered',providerMessageId:'captured',raw:'ok'};},async getStatus(){return {state:'unavailable',raw:'unknown'};}}});
   assert.equal(sent,10);
 });

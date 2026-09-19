@@ -72,6 +72,7 @@ test("an unresolvable provider status stops retries and becomes NEEDS_REVIEW", a
 
   const alwaysTimeout: DeliveryProvider = {
     name: "always-timeout",
+    live: false,
     async send(): Promise<SendResult> {
       return { outcome: "timeout", raw: "{}" };
     },
@@ -251,7 +252,7 @@ test("reclaimed lease checks delivery status even when the crashed worker never 
   const target = await db.one<{id:string}>(`SELECT id FROM delivery_job ORDER BY seq LIMIT 1`);
   await db.run(`UPDATE delivery_job SET status='PROCESSING', lease_expires_at=$1 WHERE id=$2`, [new Date(Date.now()-60000).toISOString(),target!.id]);
   let sends=0, checks=0;
-  await drainQueue(db,{maxJobs:1,provider:{name:'crash-proof',async getStatus(){checks++;return {state:'delivered',providerMessageId:'already-sent',raw:'confirmed'};},async send(){sends++;throw new Error('must not resend');}}});
+  await drainQueue(db,{maxJobs:1,provider:{name:'crash-proof',live:false,async getStatus(){checks++;return {state:'delivered',providerMessageId:'already-sent',raw:'confirmed'};},async send(){sends++;throw new Error('must not resend');}}});
   assert.equal(checks,1); assert.equal(sends,0);
   assert.equal((await db.one<{status:string}>(`SELECT status FROM delivery_job WHERE id=$1`,[target!.id]))!.status,'DELIVERED');
 });
@@ -277,6 +278,7 @@ test("a worker that died after recording its status check is recovered without a
   let sends = 0;
   const provider: DeliveryProvider = {
     name: "recovering",
+    live: false,
     async send(): Promise<SendResult> {
       sends += 1;
       return { outcome: "delivered", providerMessageId: "after-crash", raw: "{}" };

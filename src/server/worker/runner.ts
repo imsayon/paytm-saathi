@@ -1,6 +1,6 @@
 import { closeDb, getDb, newId, type Db } from "../db/client";
 import { log } from "../observability/log";
-import { mockProvider } from "../providers/mock";
+import { getDeliveryProvider } from "../providers";
 import type { DeliveryProvider } from "../providers/types";
 import { rewardPromise, type Proposal } from "../domain/rules";
 
@@ -18,6 +18,8 @@ type JobRow = {
   provider_key: string;
   attempt_count: number;
   scenario_slot: number;
+  /** Provider message id from the latest attempt that recorded one; what a status lookup needs. */
+  last_provider_message_id: string | null;
 } & SendContext;
 
 export type DrainSummary = {
@@ -71,7 +73,10 @@ async function claimJob(db: Db, workerId: string): Promise<JobRow | null> {
                 (SELECT a.id FROM campaign_approval a WHERE a.version_id = j.version_id AND a.status = 'active' LIMIT 1) AS approval_id,
                 (SELECT cs.state FROM consent cs
                   WHERE cs.merchant_id = j.merchant_id AND cs.customer_id = j.customer_id
-                  ORDER BY cs.observed_at DESC, cs.seq DESC LIMIT 1) AS consent_state`,
+                  ORDER BY cs.observed_at DESC, cs.seq DESC LIMIT 1) AS consent_state,
+                (SELECT a.provider_message_id FROM delivery_attempt a
+                  WHERE a.job_id = j.id AND a.provider_message_id IS NOT NULL
+                  ORDER BY a.attempt_no DESC LIMIT 1) AS last_provider_message_id`,
     [workerId, leaseExpiry, nowIso, MAX_ATTEMPTS, nowIso],
   );
   return claimed ?? null;
@@ -181,7 +186,7 @@ async function processJob(db: Db, job: JobRow, provider: DeliveryProvider): Prom
   // before sending anything again.
   const recovering = job.status === "UNKNOWN" || job.status === "PROCESSING" || job.attempt_count > 0;
   if (recovering) {
-    const status = await provider.getStatus(job.provider_key);
+    const status = await provider.getStatus(job.provider_key, { providerMessageId: job.last_provider_message_id });
 
     if (status.state === "delivered") {
       await settle(db, job, {
@@ -279,7 +284,9 @@ async function processJob(db: Db, job: JobRow, provider: DeliveryProvider): Prom
     attemptNo: sendAttemptNo,
     outcome: "timeout",
     raw: result.raw,
-    providerMessageId: null,
+    // A provider that handed back an id before going quiet lets the retry
+    // pass look the message up instead of sending it again.
+    providerMessageId: result.providerMessageId ?? null,
     startedAt,
     status: "UNKNOWN",
     audit: {
@@ -360,7 +367,7 @@ export async function drainQueue(
   options: { workerId?: string; provider?: DeliveryProvider; maxJobs?: number } = {},
 ): Promise<DrainSummary> {
   const workerId = options.workerId ?? `worker_${process.pid}`;
-  const provider = options.provider ?? mockProvider;
+  const provider = options.provider ?? getDeliveryProvider();
   const maxJobs = options.maxJobs ?? 500;
 
   const summary: DrainSummary = {
@@ -393,7 +400,8 @@ export async function drainQueue(
 
 async function runForever(): Promise<void> {
   const db = getDb();
-  log("info", "worker.started", { pid: process.pid, provider: mockProvider.name });
+  const provider = getDeliveryProvider();
+  log("info", "worker.started", { pid: process.pid, provider: provider.name, live: provider.live });
   let running = true;
   const stop = () => {
     running = false;

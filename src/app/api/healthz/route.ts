@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { config, describeDatabaseTarget } from "@/server/config";
+import { describeDeliveryProvider } from "@/server/providers";
 import { getDb } from "@/server/db/client";
 import { handle } from "@/server/http";
 import { log } from "@/server/observability/log";
@@ -15,7 +16,8 @@ export async function GET(request: Request) {
     const base = {
       demo_mode: config.demoMode,
       planner: config.geminiApiKey ? "gemini" : "template_fallback",
-      live_provider_integrations: 0,
+      delivery_provider: describeDeliveryProvider().name,
+      live_provider_integrations: describeDeliveryProvider().live ? 1 : 0,
     };
 
     if (!config.hasDatabaseUrl) {

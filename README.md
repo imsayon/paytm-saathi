@@ -66,6 +66,24 @@ The UI has demo controls for delivery and the outcome clock, so a presenter neve
 
 Set `TEST_DATABASE_URL` in `.env` to the Neon `test` branch (direct endpoint) or a local Postgres such as `postgresql://localhost:5432/saathi_test`. Unit and integration tests create an isolated schema per test and drop it afterwards; the e2e run resets the demo merchant's data on that database. The e2e suite refuses to start without `TEST_DATABASE_URL`, so it can never wipe the production branch by accident. A local Postgres runs the whole suite in a few seconds; the Neon branch takes about two minutes because every query crosses the network.
 
+## Sending real messages (Twilio)
+
+The only provider that ships enabled is the mock. To send real SMS or WhatsApp messages, set in `.env`:
+
+```bash
+SAATHI_DELIVERY_PROVIDER=twilio
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+TWILIO_FROM=whatsapp:+14155238886   # WhatsApp sandbox or business sender, or your SMS number in +E164
+PUBLIC_BASE_URL=https://your-host   # optional; enables signed status callbacks
+```
+
+Then `pnpm delivery:check` with `TWILIO_TEST_TO=whatsapp:+91...` sends one test message to a number verified on your Twilio account and exits 0 only on a confirmed delivery. The worker path is unchanged: a job still exists only after approval, consent and version are re-read in the claim, and the provider is asked for status by Message SID before any retry. A send that is still with the carrier after `TWILIO_SEND_WAIT_MS` becomes `UNKNOWN`; a later status lookup or the `/api/providers/twilio/status` callback (HMAC-verified against the auth token) moves it to `DELIVERED` or `FAILED`; an unresolvable status stops at `NEEDS_REVIEW`.
+
+Only routable contact references are sent (`+E164`, `sms:+E164`, `whatsapp:+E164` on the sender's channel). The synthetic fixture's `synthetic-sms:` references are refused as a terminal failure, so the demo data can never reach a phone. Stored provider payloads have the phone numbers removed. `/api/healthz` reports `delivery_provider` and `live_provider_integrations: 1` when Twilio is on, and the delivery screen shows a red "live messages" pill.
+
+Trial accounts can only message verified numbers, and WhatsApp sandbox recipients must first send the join code to the sandbox number. Promotional SMS to Indian numbers needs TRAI DLT registration; WhatsApp marketing needs an approved template and opt-in. Neither is a code change.
+
 ## Interface
 
 Five screens, one per step, rendered client-side from the same API the tests use. The motion layer ([anime.js](https://animejs.com) 4) staggers cards into view, counts the headline numbers up, grows the campaign-versus-holdout bars, lights the workflow strip stage by stage, and pops delivery jobs into their final status; it steps aside under `prefers-reduced-motion`. A light/dark toggle in the header is remembered per browser and defaults to light so a projector never gets a dark screen by surprise. Layouts collapse to one column on phones and tables scroll inside their cards.

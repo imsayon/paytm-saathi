@@ -17,6 +17,7 @@ const timedOutKeys = new Set<string>();
 
 export class MockDeliveryProvider implements DeliveryProvider {
   readonly name = "mock";
+  readonly live = false;
 
   async send(request: SendRequest): Promise<SendResult> {
     if (request.scenarioSlot === HARD_FAIL_SLOT) {

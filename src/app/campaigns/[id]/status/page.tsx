@@ -99,7 +99,11 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
           </h1>
           <StatusPill status={detail.campaign.status} />
           <span className="pill neutral plain">version {detail.campaign.current_version}</span>
-          <span className="pill warn plain">provider: {detail.provider.name} (no real messages)</span>
+          {detail.provider.live ? (
+            <span className="pill bad">provider: {detail.provider.name} · live messages</span>
+          ) : (
+            <span className="pill warn plain">provider: {detail.provider.name} (no real messages)</span>
+          )}
         </div>
         <p className="lede">
           Jobs exist because approval committed them — the preview never called a provider. Each job carries a stable provider

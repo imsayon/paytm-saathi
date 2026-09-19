@@ -18,7 +18,8 @@
     "test": "node --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:e2e": "playwright test",
     "fixture:generate": "tsx scripts/generate-fixture.ts",
-    "ai:check": "tsx scripts/check-planner.ts"
+    "ai:check": "tsx scripts/check-planner.ts",
+    "delivery:check": "tsx scripts/check-delivery.ts"
   },
   "dependencies": {
     "animejs": "4.5.0",

@@ -1,4 +1,5 @@
 import { listAudit } from "../audit/events";
+import { describeDeliveryProvider } from "../providers";
 import type { MerchantContext } from "../auth/context";
 import type { Db } from "../db/client";
 import { listRecipients, loadCampaign, loadVersion, type CampaignRow, type VersionRow } from "./campaign";
@@ -224,6 +225,6 @@ export async function buildCampaignDetail(db: Db, ctx: MerchantContext, campaign
       details: event.details,
       created_at: event.created_at,
     })),
-    provider: { name: "mock", live: false },
+    provider: describeDeliveryProvider(),
   };
 }
