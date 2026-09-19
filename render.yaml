@@ -1,0 +1,50 @@
+# Render Blueprint for the Paytm Saathi demo.
+# Dashboard: New -> Blueprint -> pick this repository; Render reads this file
+# and prompts for the three `sync: false` secrets below. Never put real
+# connection strings or keys in this file.
+services:
+  - type: web
+    name: paytm-saathi
+    runtime: node
+    repo: https://github.com/imsayon/paytm-saathi
+    branch: main
+    # Closest Render region to Bengaluru. Neon's compute is in ap-southeast-1
+    # as well, so the app and the database stay in the same part of the world.
+    region: singapore
+    # `free` spins down after 15 idle minutes and takes ~1 min to wake, which
+    # is fine for judging but not for a live stage demo; use `starter` for that.
+    # Pre-deploy commands are paid-only, so on `free` the migration runs at the
+    # end of the build instead (idempotent and advisory-locked, see
+    # src/server/db/migrate.ts).
+    plan: free
+    # pnpm is pinned to the version in package.json's `packageManager` field.
+    # `--prod=false` keeps devDependencies (typescript, tsx) installed even if
+    # NODE_ENV is set, because `next build` and the migration script need them.
+    buildCommand: npm install -g pnpm@12.4.2 && pnpm install --frozen-lockfile --prod=false && pnpm build && pnpm db:migrate
+    # The `pnpm start` script binds to 127.0.0.1 on purpose for local demos;
+    # Render's port scan needs 0.0.0.0. `next start` reads $PORT on its own.
+    startCommand: npx next start --hostname 0.0.0.0
+    # Fails closed with 503 until the database answers and every migration is
+    # recorded, so a deploy is never marked live against an unmigrated database.
+    healthCheckPath: /api/readyz
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      # The only session this build has is the seeded demo merchant; the app
+      # refuses every request without demo mode. The data is synthetic and the
+      # only provider is a mock, so the /api/demo/* controls are reachable by
+      # anyone who has the URL. See README "Security and trust".
+      - key: SAATHI_DEMO_MODE
+        value: "true"
+      - key: SAATHI_GEMINI_MODEL
+        value: gemini-2.5-flash
+      # Neon pooled endpoint (host contains "-pooler"): application traffic.
+      - key: DATABASE_URL
+        sync: false
+      # Neon direct endpoint: migrations, run at the end of the build.
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      # Optional. Without it the planner uses the labelled template fallback.
+      - key: GEMINI_API_KEY
+        sync: false

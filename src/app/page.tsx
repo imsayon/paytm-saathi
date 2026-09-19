@@ -191,7 +191,7 @@ export default function ImportPage() {
             </label>
             {signal ? (
               <a className="btn ghost" href="/signals">
-                Inspect the audience <Icon name="arrow" size={15} />
+                See who qualifies <Icon name="arrow" size={15} />
               </a>
             ) : null}
           </div>

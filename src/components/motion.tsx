@@ -196,20 +196,22 @@ export function SplitText({ text, accent, className }: { text: string; accent?: 
     };
   }, [text, accent]);
 
+  // Words stay unbreakable inside their span; the separator is an ordinary
+  // space text node so the accessible name reads naturally.
   const render = (value: string, extra?: string) =>
-    value.split(" ").map((word, wi, words) => (
+    value.split(" ").flatMap((word, wi, words) => [
       <span key={`${extra ?? "b"}-${wi}`} className={`word ${extra ?? ""}`}>
         {Array.from(word).map((ch, ci) => (
           <span key={ci} className="ch" style={{ opacity: 0 }}>
             {ch}
           </span>
         ))}
-        {wi < words.length - 1 ? " " : null}
-      </span>
-    ));
+      </span>,
+      wi < words.length - 1 ? " " : null,
+    ]);
 
   return (
-    <span ref={root} className={className}>
+    <span ref={root} className={className} aria-label={[text, accent].filter(Boolean).join(" ")}>
       {render(text)}
       {accent ? (
         <>

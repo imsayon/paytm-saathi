@@ -211,6 +211,19 @@ Run `pnpm typecheck`, `pnpm test`, `pnpm build` and `pnpm test:e2e` for essentia
 
 Additional limits: the CSV reader is line-oriented and does not support quoted multiline fields; imported payment conflicts are ignored, not reconciled as real refunds; demo consent comes from the first CSV row per customer. The mock executes manually rather than scheduling sends within proposed windows. These are pilot prerequisites, not production capabilities.
 
+## Deploy to Render
+
+[`render.yaml`](render.yaml) describes one web service (Node, Singapore region, `free` plan). In the Render dashboard choose **New → Blueprint**, pick this repository and branch `main`; Render reads the file and asks for the three secrets it does not carry: `DATABASE_URL` (pooled), `DATABASE_URL_UNPOOLED` (direct) and `GEMINI_API_KEY`. Paste them from your local `.env` or the Neon console.
+
+What the Blueprint does differently from a local run:
+
+- The start command binds to `0.0.0.0` (Render's port scan needs it); `pnpm start` keeps the loopback binding for local demos.
+- `pnpm db:migrate` runs at the end of the build, because pre-deploy commands are paid-only on Render. It is idempotent and takes an advisory lock, so a rebuild against an already-migrated database is a no-op.
+- The health check is `/api/readyz`, so a deploy never goes live until every migration is recorded.
+- `SAATHI_DEMO_MODE=true` is required: the only session this build has is the seeded demo merchant. Anyone with the URL can use the demo controls, including **Reset demo data**. The data is synthetic and the provider is a mock, so nothing outside the database is touched.
+
+Seed once after the first deploy if the database is empty: run `pnpm db:seed` locally against the same `DATABASE_URL`. The free plan sleeps after fifteen idle minutes and takes about a minute to wake; switch `plan` to `starter` for a live stage demo.
+
 ## License
 
 No license has been selected yet. Do not assume this repository may be reused or redistributed until the project owner adds one.
