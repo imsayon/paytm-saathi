@@ -31,10 +31,9 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "24"
-      # Production uses Neon Auth and gives each signed-in merchant a private workspace.
-      # Keep the preview/demo switch off on the public deployment.
+      # The hackathon deployment keeps sandbox controls available to signed-in merchants.
       - key: SAATHI_DEMO_MODE
-        value: "false"
+        value: "true"
       - key: SAATHI_GEMINI_MODEL
         value: gemini-2.5-flash
       # Neon Auth is branchable identity in the same backend as the product DB.
