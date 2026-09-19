@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import type { CampaignDetail, MeasurementReport } from "@/components/types";
 import { AnimatedBar, CountUp, Reveal, SplitText, TiltCard } from "@/components/motion";
-import { apiCall, AuditTimeline, Banner, DemoBanner, ErrorBanner, Icon, InitialLoad, KeyValue, percent, rupees, Stat, StatusPill, Steps } from "@/components/ui";
+import { apiCall, AuditTimeline, Banner, ErrorBanner, Icon, InitialLoad, KeyValue, percent, rupees, Stat, StatusPill } from "@/components/ui";
 
 type OutcomeResponse = {
   campaign: CampaignDetail["campaign"];
@@ -71,23 +71,19 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
 
   return (
     <Reveal ready refreshKey={`${report.has_outcomes}:${report.campaign.returns}`}>
-      <DemoBanner />
-      <Steps current="outcome" campaignId={id} />
-
       <div data-reveal>
         <div className="eyebrow">
-          <span className="blink" /> Step 5 · holdout report
+          <span className="blink" /> Results
         </div>
         <div className="page-head">
           <h1>
-            <SplitText text="Seven-day outcome," accent="against a control" />
+            <SplitText text="How it went" accent="after seven days" />
           </h1>
           <StatusPill status={data.campaign.status} />
           <span className="pill neutral plain">version {data.version.version}</span>
         </div>
         <p className="lede">
-          Compare campaign returns with an untouched holdout. The report is descriptive and shows how the measurement is calculated;
-          it is not a causal estimate.
+          Compare the customers who received the offer with the customers kept aside. This gives you a clear view of what happened.
         </p>
       </div>
 
@@ -96,13 +92,13 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
           <span className={`radar${busy ? " on" : ""}`}>
             <button onClick={runOutcome} disabled={busy}>
               {busy ? <span className="spinner" /> : <Icon name="clock" size={16} />}
-              {report.has_outcomes ? "Re-run outcome window" : "Advance outcome window seven days"}
+              {report.has_outcomes ? "Refresh results" : "Check results"}
             </button>
           </span>
           <a className="btn secondary" href={`/campaigns/${id}/status`}>
             Back to delivery
           </a>
-          <span className="tiny muted">Re-running is idempotent: it does not create duplicate outcomes or change the numbers.</span>
+          <span className="tiny muted">You can refresh these results any time.</span>
         </div>
         <div style={{ marginTop: 12 }}>
           <ErrorBanner error={error} />
@@ -111,52 +107,50 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
 
       {!report.has_outcomes ? (
         <div className="card" data-reveal>
-          <h2>No outcome window yet</h2>
+          <h2>Results are not ready yet</h2>
           <p className="muted" style={{ marginBottom: 0 }}>
-            Run delivery, then advance the outcome window to materialize the seven-day report.
+            Send the offer first, then check back after seven days.
           </p>
         </div>
       ) : (
         <>
           <div className="grid four">
-            <Stat value={percent(report.campaign.return_rate)} label="Campaign return rate" tone="ok" />
-            <Stat value={percent(report.holdout.return_rate)} label="Holdout return rate" />
-            <Stat value={`${report.observed_lift_pp} pp`} label="Descriptive difference" tone="info" hint="not a causal estimate" />
-            <Stat value={report.expected_incremental_returns} label="Estimated incremental returns" hint="group size × difference" />
+            <Stat value={percent(report.campaign.return_rate)} label="Offer group return rate" tone="ok" />
+            <Stat value={percent(report.holdout.return_rate)} label="Kept aside return rate" />
+            <Stat value={`${report.observed_lift_pp} pp`} label="Difference" tone="info" />
+            <Stat value={report.expected_incremental_returns} label="Extra returns" />
           </div>
 
           <div className="grid two">
             <TiltCard className="card" data-reveal>
-              <h3>Campaign versus holdout</h3>
+              <h3>Offer group versus kept aside</h3>
               <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
                 <span className="stat hero-number">
                   <CountUp value={`${report.observed_lift_pp} pp`} duration={1600} />
                 </span>
-                <span className="tiny muted">difference in return rate over the window</span>
+                <span className="tiny muted">difference in return rate</span>
               </div>
               <RateBar label="Campaign" rate={report.campaign.return_rate} returns={report.campaign.returns} size={report.campaign.size} />
               <RateBar label="Holdout" rate={report.holdout.return_rate} returns={report.holdout.returns} size={report.holdout.size} holdout />
               <div className="legend">
-                <span>Campaign group (received the offer)</span>
-                <span className="holdout">Holdout (received nothing)</span>
+                <span>Offer group</span>
+                <span className="holdout">Kept aside</span>
               </div>
               <p className="tiny muted" style={{ marginBottom: 0 }}>
-                Window {report.window_start} to {report.window_end}. A return is at least one settled, non-refunded, non-duplicate payment
-                inside the window.
+                {report.window_start} to {report.window_end}. A return means the customer paid at least once during this period.
               </p>
             </TiltCard>
 
             <TiltCard className="card" data-reveal>
-              <h3>Commercial impact</h3>
-              <KeyValue label="Campaign return volume" value={rupees(report.campaign.return_volume_minor)} />
+              <h3>Money movement</h3>
+              <KeyValue label="Offer group sales" value={rupees(report.campaign.return_volume_minor)} />
               <KeyValue
-                label="Expected baseline volume"
+                label="Expected without offer"
                 value={rupees(report.expected_campaign_baseline_volume_minor)}
-                hint="holdout rate × group size × avg return"
               />
-              <KeyValue label="Incremental payment volume" value={rupees(report.incremental_payment_volume_minor)} />
-              <KeyValue label="Reward cost" value={rupees(report.reward_cost_minor)} hint="redeemed rewards" />
-              <KeyValue label="Contribution proxy after reward" value={rupees(report.contribution_proxy_minor)} hint="not profit" />
+              <KeyValue label="Extra sales" value={rupees(report.incremental_payment_volume_minor)} />
+              <KeyValue label="Reward cost" value={rupees(report.reward_cost_minor)} />
+              <KeyValue label="After rewards" value={rupees(report.contribution_proxy_minor)} />
             </TiltCard>
           </div>
 
@@ -165,39 +159,37 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
               <div className="stat small">
                 <CountUp value={report.opt_outs} />
               </div>
-              <div className="stat-label">Opt-outs recorded</div>
+              <div className="stat-label">Opt-outs</div>
             </div>
             <div className="card tight" data-reveal>
               <div className="stat small">
                 <CountUp value={report.delivery_errors} />
               </div>
-              <div className="stat-label">Delivery errors (failed or unresolved)</div>
+              <div className="stat-label">Delivery issues</div>
             </div>
             <div className="card tight" data-reveal>
               <div className="stat small">{data.setup_seconds === null ? "—" : <CountUp value={`${data.setup_seconds}s`} />}</div>
-              <div className="stat-label">Setup time: import to approval</div>
+              <div className="stat-label">Time to prepare</div>
             </div>
           </div>
 
-          <div className="card" data-reveal>
-            <h3>How each number is calculated</h3>
-            <table>
+          <details className="card" data-reveal>
+            <summary>Show calculation details</summary>
+            <table style={{ marginTop: 14 }}>
               <tbody>
                 {Object.entries(report.formulas).map(([name, formula]) => (
                   <tr key={name}>
-                    <td style={{ width: "34%" }}>
-                      <code>{name}</code>
-                    </td>
+                    <td style={{ width: "34%" }}><code>{name}</code></td>
                     <td className="muted">{formula}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </details>
 
           <div data-reveal>
             <Banner tone="warn" icon="alert">
-              <strong>Read this before believing the numbers.</strong>
+              <strong>Keep this in mind.</strong>
               <ul>
                 {report.caveats.map((caveat) => (
                   <li key={caveat}>{caveat}</li>
@@ -209,7 +201,7 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
       )}
 
       <div className="card" data-reveal>
-        <h3>Audit trail</h3>
+        <h3>Activity</h3>
         <AuditTimeline events={data.audit} />
       </div>
     </Reveal>

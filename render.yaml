@@ -1,4 +1,4 @@
-# Render Blueprint for the Paytm Saathi demo.
+# Render Blueprint for Paytm Saathi.
 # Dashboard: New -> Blueprint -> pick this repository; Render reads this file
 # and prompts for the three `sync: false` secrets below. Never put real
 # connection strings or keys in this file.
@@ -31,12 +31,10 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "24"
-      # The only session this build has is the seeded demo merchant; the app
-      # refuses every request without demo mode. The data is synthetic and the
-      # only provider is a mock, so the /api/demo/* controls are reachable by
-      # anyone who has the URL. See README "Security and trust".
+      # Production uses Neon Auth and gives each signed-in merchant a private workspace.
+      # Keep the preview/demo switch off on the public deployment.
       - key: SAATHI_DEMO_MODE
-        value: "true"
+        value: "false"
       - key: SAATHI_GEMINI_MODEL
         value: gemini-2.5-flash
       # Neon Auth is branchable identity in the same backend as the product DB.

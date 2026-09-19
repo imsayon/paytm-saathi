@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Reveal, SplitMeter, SplitText, TiltCard } from "@/components/motion";
-import { apiCall, DemoBanner, ErrorBanner, Icon, InitialLoad, rupees, Stat, Steps } from "@/components/ui";
+import { apiCall, ErrorBanner, Icon, InitialLoad, rupees, Stat } from "@/components/ui";
 
 type CustomerView = {
   customer_ref: string;
@@ -91,11 +91,10 @@ export default function SignalsPage() {
   if (!signal) {
     return (
       <Reveal ready>
-        <Steps current="signal" />
         <div className="card" data-reveal>
-          <h2>No payment data imported</h2>
+          <h2>Add payment data first</h2>
           <p className="muted" style={{ marginBottom: 0 }}>
-            <a href="/">Load sample data</a> first — the audience is derived from settled payments.
+            <a href="/">Upload payment data</a> to see your customer activity.
           </p>
         </div>
       </Reveal>
@@ -110,89 +109,82 @@ export default function SignalsPage() {
 
   return (
     <Reveal ready refreshKey={signal.eligible_count}>
-      <DemoBanner planner={overview.demo.planner} />
-      <Steps current="signal" />
-
       <div data-reveal>
         <div className="eyebrow">
-          <span className="blink" /> Step 2 · the signal
+          <span className="blink" /> Customer activity
         </div>
         <h1>
-          <SplitText text="Why" accent="these customers?" />
+          <SplitText text="Meet" accent="your next customers." />
         </h1>
         <p className="lede">
-          Every number here comes from deterministic rules over settled payments — no model is involved in choosing who is in
-          the audience.
+          These customers used to visit regularly and have been away for a while. Review the list, choose an offer, and decide what
+          feels right for your shop.
         </p>
       </div>
 
       <div className="grid four">
-        <Stat value={signal.regular_customers} label={`Regulars in ${signal.policy.lookbackDays} days`} tone="info" />
-        <Stat value={signal.absent_regulars} label={`Absent ${signal.policy.inactivityDays}+ days`} tone="warn" />
-        <Stat value={signal.excluded.consent_false + signal.excluded.consent_unknown} label="Excluded for consent" tone="bad" />
-        <Stat value={signal.eligible_count} label="Eligible cohort" tone="ok" />
+        <Stat value={signal.regular_customers} label={`Regular customers`} tone="info" />
+        <Stat value={signal.absent_regulars} label="Quiet regulars" tone="warn" />
+        <Stat value={signal.excluded.consent_false + signal.excluded.consent_unknown} label="Left out" tone="bad" />
+        <Stat value={signal.eligible_count} label="Ready to review" tone="ok" />
       </div>
 
       <div className="grid two">
         <TiltCard className="card" data-reveal>
-          <h3>Policy {signal.policy.version}</h3>
+          <h3>How the list is chosen</h3>
           <ul className="checks">
             <li>
               <span className="tick ok">
                 <Icon name="check" />
               </span>
-              <span>
-                A regular has at least {signal.policy.minSettledVisits} settled visits across at least{" "}
-                {signal.policy.minDistinctDates} distinct dates in the last {signal.policy.lookbackDays} days.
-              </span>
+              <span>Regular customers have visited at least {signal.policy.minSettledVisits} times on {signal.policy.minDistinctDates} different days in the last {signal.policy.lookbackDays} days.</span>
             </li>
             <li>
               <span className="tick ok">
                 <Icon name="check" />
               </span>
-              <span>Absent means no settled visit in the trailing {signal.policy.inactivityDays} days.</span>
+              <span>Quiet means they have not visited in the last {signal.policy.inactivityDays} days.</span>
             </li>
             <li>
               <span className="tick ok">
                 <Icon name="check" />
               </span>
-              <span>Refunded and duplicate payments never count as a visit.</span>
+              <span>Refunds and duplicate payments are not counted as visits.</span>
             </li>
             <li>
               <span className="tick ok">
                 <Icon name="check" />
               </span>
-              <span>Consent must be recorded as true and a contact reference must exist.</span>
+              <span>Only people who have given permission and have contact details are included.</span>
             </li>
             <li>
               <span className="tick ok">
                 <Icon name="check" />
               </span>
-              <span>The cohort is capped at {signal.policy.cohortCap} and ordered by a stable hash.</span>
+              <span>The list is limited to {signal.policy.cohortCap} people so it stays manageable.</span>
             </li>
           </ul>
         </TiltCard>
 
         <TiltCard className="card" data-reveal>
-          <h3>Deterministic split (applied at approval)</h3>
+          <h3>Plan your next offer</h3>
           <div className="split-label">
             <span className="pill info">Campaign {campaignSize}</span>
             <span className="pill neutral">Holdout {holdoutSize}</span>
           </div>
           <SplitMeter campaign={campaignSize} holdout={holdoutSize} />
           <p className="tiny muted">
-            The holdout receives nothing at all — no message and no delivery job. It supplies a comparison baseline; this report is
-            descriptive and not a causal estimate.
+            Half of the list is kept aside so you can compare what happened with and without the offer.
           </p>
           <div className="field" style={{ marginTop: 14 }}>
-            <label htmlFor="intent">Merchant intent</label>
+            <label htmlFor="intent">What would you like to say?</label>
             <textarea id="intent" value={intent} onChange={(event) => setIntent(event.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="cap">Reward budget cap (₹)</label>
+            <label htmlFor="cap">Maximum reward per customer (₹)</label>
             <input id="cap" type="number" min="1" step="1" value={capRupees} onChange={(event) => setCapRupees(event.target.value)} />
             <p className="help">
-              Cap is enforced by rules, not by the model. Current cap: {rupees(capMinor)}
+              Your maximum spend is {rupees(capMinor)}
               {eligible.length > 0 ? ` · cap-safe reward ≤ ${rupees(Math.floor(capMinor / eligible.length))}` : ""}
             </p>
           </div>
@@ -201,7 +193,7 @@ export default function SignalsPage() {
               {busy ? <span className="spinner" /> : <Icon name="pen" size={16} />}
               Draft a campaign
             </button>
-            <span className="tiny muted">The planner sees counts only. Never an identifier, never a contact.</span>
+            <span className="tiny muted">You will review the message before anything is sent.</span>
           </div>
           <div style={{ marginTop: 12 }}>
             <ErrorBanner error={error} />
@@ -210,7 +202,7 @@ export default function SignalsPage() {
       </div>
 
       <div className="card" data-reveal>
-        <h3>Eligible cohort ({eligible.length})</h3>
+        <h3>Customers to review ({eligible.length})</h3>
         <div className="scroll">
           <table>
             <thead>
@@ -239,11 +231,11 @@ export default function SignalsPage() {
             </tbody>
           </table>
         </div>
-        <p className="note">Identifiers are masked. Contact references are never shown in the UI and never sent to the model.</p>
+        <p className="note">Only customers who have given permission are shown here.</p>
       </div>
 
       <div className="card" data-reveal>
-        <h3>Excluded from the audience ({excluded.length})</h3>
+        <h3>Not included ({excluded.length})</h3>
         <table>
           <thead>
             <tr>

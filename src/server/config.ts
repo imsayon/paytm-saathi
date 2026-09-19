@@ -68,7 +68,7 @@ export function loadConfig(): AppConfig {
     get hasDatabaseUrl(): boolean {
       return nonEmpty(process.env.DATABASE_URL) !== null;
     },
-    demoMode: readBool(process.env.SAATHI_DEMO_MODE, true),
+    demoMode: readBool(process.env.SAATHI_DEMO_MODE, false),
     geminiApiKey: nonEmpty(process.env.GEMINI_API_KEY),
     geminiModel: process.env.SAATHI_GEMINI_MODEL ?? "gemini-2.5-flash",
     deliveryProvider: process.env.SAATHI_DELIVERY_PROVIDER?.trim().toLowerCase() === "twilio" ? "twilio" : "mock",

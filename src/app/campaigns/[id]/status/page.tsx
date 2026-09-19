@@ -3,16 +3,7 @@
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import type { CampaignDetail, JobView } from "@/components/types";
 import { popIn, Reveal, SplitText, TiltCard } from "@/components/motion";
-import { apiCall, AuditTimeline, Banner, DemoBanner, ErrorBanner, Icon, InitialLoad, Stat, StatusPill, Steps } from "@/components/ui";
-
-const OUTCOME_LABEL: Record<string, string> = {
-  delivered: "delivered",
-  failed: "failed",
-  timeout: "timed out",
-  status_check_not_delivered: "status check: not delivered",
-  status_check_delivered: "status check: delivered",
-  status_check_unavailable: "status check: unavailable",
-};
+import { apiCall, AuditTimeline, Banner, ErrorBanner, Icon, InitialLoad, Stat, StatusPill } from "@/components/ui";
 
 function JobStrip({ jobs, busy }: { jobs: JobView[]; busy: boolean }) {
   const root = useRef<HTMLDivElement>(null);
@@ -86,36 +77,27 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
 
   return (
     <Reveal ready refreshKey={`${total}:${pending}`}>
-      <DemoBanner />
-      <Steps current="delivery" campaignId={id} />
-
       <div data-reveal>
         <div className="eyebrow">
-          <span className="blink" /> Step 4 · delivery
+          <span className="blink" /> Delivery
         </div>
         <div className="page-head">
           <h1>
-            <SplitText text="Delivery," accent="one idempotent job at a time" />
+            <SplitText text="Send your offer" accent="when you're ready" />
           </h1>
           <StatusPill status={detail.campaign.status} />
           <span className="pill neutral plain">version {detail.campaign.current_version}</span>
-          {detail.provider.live ? (
-            <span className="pill bad">provider: {detail.provider.name} · live</span>
-          ) : (
-            <span className="pill warn plain">preview provider</span>
-          )}
         </div>
         <p className="lede">
-          Jobs exist because approval committed them — the preview never called a provider. Each job carries a stable provider
-          idempotency key, and consent is checked once more immediately before the provider is invoked.
+          Your approved offer is ready. Check the list below, then send it when it feels right.
         </p>
       </div>
 
       <div className="grid four">
-        <Stat value={total} label="Jobs queued at approval" tone="info" />
-        <Stat value={summary.DELIVERED ?? 0} label="Delivered" tone="ok" />
-        <Stat value={(summary.FAILED ?? 0) + (summary.NEEDS_REVIEW ?? 0)} label="Failed or needs review" tone="bad" />
-        <Stat value={detail.groups.holdout.length} label="Holdout (never contacted)" />
+        <Stat value={total} label="Customers in offer" tone="info" />
+        <Stat value={summary.DELIVERED ?? 0} label="Sent" tone="ok" />
+        <Stat value={(summary.FAILED ?? 0) + (summary.NEEDS_REVIEW ?? 0)} label="Needs attention" tone="bad" />
+        <Stat value={detail.groups.holdout.length} label="Kept aside" />
       </div>
 
       <TiltCard className="card" data-reveal>
@@ -123,22 +105,20 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
           <span className={`radar${busy ? " on" : ""}`}>
             <button onClick={runDelivery} disabled={busy}>
               {busy ? <span className="spinner" /> : <Icon name="send" size={16} />}
-              Run delivery
+              Send offer
             </button>
           </span>
           <a className="btn secondary" href={`/campaigns/${id}/outcome`}>
-            Go to outcome report <Icon name="arrow" size={15} />
+            See results <Icon name="arrow" size={15} />
           </a>
           <span className="tiny muted">
-            {pending > 0 ? `${pending} job(s) still pending.` : "No pending jobs."} Re-running is safe: delivered jobs are terminal and
-            are not re-sent.
+            {pending > 0 ? `${pending} message(s) are still being processed.` : "Nothing is waiting to be sent."}
           </span>
         </div>
         {total > 0 ? <JobStrip jobs={detail.jobs} busy={busy} /> : null}
         {lastRun ? (
           <p className="note">
-            Last run processed {lastRun.processed} job step(s): {lastRun.delivered} delivered, {lastRun.failed} failed, {lastRun.unknown} timed out,{" "}
-            {lastRun.needsReview} for review, {lastRun.cancelled} cancelled before any provider call.
+            Last run: {lastRun.delivered} sent, {lastRun.failed} failed, {lastRun.unknown} timed out, {lastRun.needsReview} need review, {lastRun.cancelled} cancelled.
           </p>
         ) : null}
         <div style={{ marginTop: 12 }}>
@@ -147,11 +127,10 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
       </TiltCard>
 
       <div className="card" data-reveal>
-        <h3>Delivery jobs</h3>
+        <h3>Message status</h3>
         {total === 0 ? (
           <p className="muted">
-            No jobs yet. Jobs are created only by a successful approval — <a href={`/campaigns/${id}/review`}>review</a> the campaign
-            first.
+            Nothing is ready yet. <a href={`/campaigns/${id}/review`}>Review the offer</a> first.
           </p>
         ) : (
           <div className="scroll">
@@ -161,8 +140,6 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
                   <th>Customer</th>
                   <th>Status</th>
                   <th className="num">Attempts</th>
-                  <th>Provider idempotency key</th>
-                  <th>Attempt log</th>
                 </tr>
               </thead>
               <tbody>
@@ -176,19 +153,6 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
                       {job.cancel_reason ? <div className="tiny muted">{job.cancel_reason}</div> : null}
                     </td>
                     <td className="num">{job.attempts}</td>
-                    <td>
-                      <code>{job.provider_key.slice(0, 18)}…</code>
-                    </td>
-                    <td className="tiny muted">
-                      {job.attempt_log.map((attempt) => (
-                        <div key={attempt.attempt_no}>
-                          #{attempt.attempt_no} {attempt.outcome}
-                          {OUTCOME_LABEL[attempt.outcome] && OUTCOME_LABEL[attempt.outcome] !== attempt.outcome ? (
-                            <span className="muted"> · {OUTCOME_LABEL[attempt.outcome]}</span>
-                          ) : null}
-                        </div>
-                      ))}
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -198,23 +162,21 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
         {recovered ? (
           <div style={{ marginTop: 12 }}>
             <Banner tone="info" icon="shield">
-              One job timed out. The worker asked the provider for status with the same idempotency key, got proof that nothing was
-              delivered, and only then sent again. A blind retry never happens.
+              One message took longer than expected and was checked before anything was sent again.
             </Banner>
           </div>
         ) : null}
         {(summary.UNKNOWN ?? 0) > 0 || (summary.NEEDS_REVIEW ?? 0) > 0 ? (
           <div style={{ marginTop: 12 }}>
             <Banner tone="warn" icon="alert">
-              A provider timeout never triggers a blind retry. The worker asks the provider for status using the same idempotency key
-              and only re-sends when status proves nothing was delivered; otherwise the job stops for manual review.
+              Some messages need your attention before we try them again.
             </Banner>
           </div>
         ) : null}
       </div>
 
       <div className="card" data-reveal>
-        <h3>Audit trail</h3>
+        <h3>Activity</h3>
         <AuditTimeline events={detail.audit} />
       </div>
     </Reveal>

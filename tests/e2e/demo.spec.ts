@@ -14,18 +14,18 @@ test("the full demo path runs from import to holdout report", async ({ page }) =
 
   // 1. Import the frozen fixture.
   await page.getByRole("button", { name: "Load sample data" }).click();
-  await expect(page.getByText("Regulars now absent 21+ days")).toBeVisible();
+  await expect(page.getByText("Quiet regulars").first()).toBeVisible();
 
   // 2. The documented signal.
-  await expect(page.locator(".card", { hasText: "Customers imported" }).locator(".stat")).toHaveText("78");
-  await expect(page.locator(".card", { hasText: "Regulars now absent 21+ days" }).locator(".stat")).toHaveText("24");
-  await expect(page.locator(".card", { hasText: "Eligible after consent" }).locator(".stat")).toHaveText("20");
+  await expect(page.locator(".grid.four").first().locator(".card").nth(0).locator(".stat")).toHaveText("78");
+  await expect(page.locator(".grid.four").first().locator(".card").nth(2).locator(".stat")).toHaveText("24");
+  await expect(page.locator(".grid.four").first().locator(".card").nth(3).locator(".stat")).toHaveText("20");
 
   // 3. Inspect the audience and its exclusions.
-  await page.getByRole("link", { name: "Inspect the audience" }).click();
-  await expect(page.getByRole("heading", { name: "Why these customers?" })).toBeVisible();
-  await expect(page.getByText("Eligible cohort (20)")).toBeVisible();
-  await expect(page.getByText("Excluded from the audience (4)")).toBeVisible();
+  await page.getByRole("link", { name: "Review customers" }).first().click();
+  await expect(page.getByRole("heading", { name: "Meet your next customers." })).toBeVisible();
+  await expect(page.getByText("Customers to review (20)")).toBeVisible();
+  await expect(page.getByText("Not included (4)")).toBeVisible();
   await expect(page.locator(".split-label")).toContainText("Campaign 10");
   await expect(page.locator(".split-label")).toContainText("Holdout 10");
 
@@ -39,37 +39,37 @@ test("the full demo path runs from import to holdout report", async ({ page }) =
   await expect(page.getByRole("button", { name: /^Approve version/ })).toBeDisabled();
 
   // 6. Revise to a cap-safe offer with matching copy.
-  await expect(page.getByRole("heading", { name: "Compare affordable offers" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Compare offers" })).toBeVisible();
   await page.getByRole("button", { name: "Use ₹15.00 offer", exact: true }).click();
   await expect(page.getByText("Get ₹15.00 off one order on a weekday. Valid for 7 days.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Approve version/ })).toBeDisabled();
   await page.getByRole("button", { name: "Save as version 2" }).click();
 
-  await expect(page.getByText("All deterministic checks pass.")).toBeVisible();
+  await expect(page.getByText("This offer is ready.")).toBeVisible();
   await expect(page.getByText("₹300.00").first()).toBeVisible();
 
   // 7. Approve exactly one version.
   await page.getByRole("button", { name: "Approve version 2" }).click();
   await expect(page).toHaveURL(/\/status$/);
-  await expect(page.locator(".card", { hasText: "Jobs queued at approval" }).locator(".stat")).toHaveText("10");
-  await expect(page.locator(".card", { hasText: "Holdout (never contacted)" }).locator(".stat")).toHaveText("10");
+  await expect(page.locator(".card", { hasText: "Customers in offer" }).locator(".stat")).toHaveText("10");
+  await expect(page.locator(".card", { hasText: "Kept aside" }).locator(".stat")).toHaveText("10");
 
   // 8. Run delivery, including the timeout that recovers via a status check.
-  await page.getByRole("button", { name: "Run delivery" }).click();
-  await expect(page.locator(".card", { hasText: "Delivered" }).locator(".stat")).toHaveText("9", { timeout: 30_000 });
-  await expect(page.locator(".card", { hasText: "Failed or needs review" }).locator(".stat")).toHaveText("1");
-  await expect(page.getByText("status_check_not_delivered")).toBeVisible();
+  await page.getByRole("button", { name: "Send offer" }).click();
+  await expect(page.locator(".card", { hasText: "Sent" }).locator(".stat")).toHaveText("9", { timeout: 30_000 });
+  await expect(page.locator(".card", { hasText: "Needs attention" }).locator(".stat")).toHaveText("1");
+  await expect(page.getByText("One message took longer than expected")).toBeVisible();
 
   // 9. Advance the outcome window seven days.
-  await page.getByRole("link", { name: "Go to outcome report" }).click();
-  await page.getByRole("button", { name: "Advance outcome window seven days" }).click();
+  await page.getByRole("link", { name: "See results" }).click();
+  await page.getByRole("button", { name: "Check results" }).click();
 
   // 10. Campaign versus holdout, with the caveats visible.
-  await expect(page.locator(".card", { hasText: "Campaign return rate" }).locator(".stat")).toHaveText("60%", {
+  await expect(page.locator(".card", { hasText: "Offer group return rate" }).locator(".stat")).toHaveText("60%", {
     timeout: 30_000,
   });
-  await expect(page.locator(".card", { hasText: "Holdout return rate" }).locator(".stat")).toHaveText("20%");
-  await expect(page.locator(".card", { hasText: "Descriptive difference" }).locator(".stat")).toHaveText("40 pp");
+  await expect(page.locator(".card", { hasText: "Kept aside return rate" }).locator(".stat")).toHaveText("20%");
+  await expect(page.locator(".card", { hasText: "Difference" }).locator(".stat").first()).toHaveText("40 pp");
   await expect(page.getByText(/not proof of causal impact/)).toBeVisible();
 
   // 11. The audit trail covers the whole path.
@@ -129,9 +129,9 @@ test("the outcome simulation stays idempotent when re-run", async ({ page }) => 
   const campaignUrl = page.url().replace("/review", "/outcome");
   await page.goto(campaignUrl);
 
-  await page.getByRole("button", { name: "Re-run outcome window" }).click();
-  await expect(page.locator(".card", { hasText: "Campaign return rate" }).locator(".stat")).toHaveText("60%");
-  await expect(page.locator(".card", { hasText: "Holdout return rate" }).locator(".stat")).toHaveText("20%");
+  await page.getByRole("button", { name: "Refresh results" }).click();
+  await expect(page.locator(".card", { hasText: "Offer group return rate" }).locator(".stat")).toHaveText("60%");
+  await expect(page.locator(".card", { hasText: "Kept aside return rate" }).locator(".stat")).toHaveText("20%");
 });
 
 test("initial API failures are visible and every screen can retry", async ({ page, request }) => {

@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Paytm Saathi",
-  description: "Merchant retention workflow: signal, plan, approval, delivery, measurement.",
+  description: "A simple workspace for understanding customer activity and planning thoughtful offers.",
 };
 
 export const viewport: Viewport = {
@@ -30,7 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Icon name="spark" />
               </span>
               Paytm Saathi
-              <small>retention, approved and measured</small>
+              <small>merchant workspace</small>
             </a>
             <Nav />
           </div>
@@ -38,8 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="shell">{children}</main>
         <footer className="footer">
           <div className="inner">
-            <span>Saathi · merchant retention workspace</span>
-            <span>AI drafts · rules decide · you approve</span>
+            <span>Paytm Saathi · merchant workspace</span>
           </div>
         </footer>
       </body>

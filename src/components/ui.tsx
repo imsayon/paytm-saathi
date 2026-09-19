@@ -158,11 +158,11 @@ type StepId = "import" | "signal" | "review" | "delivery" | "outcome";
 /** The five-step rail. Completed steps link back when a campaign is known. */
 export function Steps({ current, campaignId }: { current: StepId; campaignId?: string }) {
   const steps: { id: StepId; label: string; href: string | null }[] = [
-    { id: "import", label: "Import", href: "/" },
-    { id: "signal", label: "Signal", href: "/signals" },
-    { id: "review", label: "Review & approve", href: campaignId ? `/campaigns/${campaignId}/review` : null },
+    { id: "import", label: "Data", href: "/" },
+    { id: "signal", label: "Customers", href: "/signals" },
+    { id: "review", label: "Review", href: campaignId ? `/campaigns/${campaignId}/review` : null },
     { id: "delivery", label: "Delivery", href: campaignId ? `/campaigns/${campaignId}/status` : null },
-    { id: "outcome", label: "Holdout report", href: campaignId ? `/campaigns/${campaignId}/outcome` : null },
+    { id: "outcome", label: "Results", href: campaignId ? `/campaigns/${campaignId}/outcome` : null },
   ];
   const activeIndex = steps.findIndex((step) => step.id === current);
 
@@ -191,21 +191,8 @@ export function Steps({ current, campaignId }: { current: StepId; campaignId?: s
 }
 
 export function DemoBanner({ planner }: { planner?: string }) {
-  return (
-    <div className="demo-flag" data-reveal>
-      <Icon name="shield" />
-      <div>
-        <strong>Workspace safeguards.</strong> Human approval is required before any provider call. Consent, budget and recipient
-        rules are enforced server-side; AI drafts copy but never selects recipients or approves campaigns.
-        {planner ? (
-          <>
-            {" "}
-            Planner: <code>{planner === "gemini" ? "Gemini" : "rule-based"}</code>.
-          </>
-        ) : null}
-      </div>
-    </div>
-  );
+  void planner;
+  return null;
 }
 
 export function ErrorBanner({ error }: { error: { message: string; details?: unknown } | null }) {
@@ -349,8 +336,8 @@ export function Nav() {
     };
   }, [pathname]);
   const links = [
-    { href: "/", label: "Import", active: pathname === "/" },
-    { href: "/signals", label: "Signal", active: pathname.startsWith("/signals") },
+    { href: "/", label: "Workspace", active: pathname === "/" },
+    { href: "/signals", label: "Customers", active: pathname.startsWith("/signals") },
   ];
   const campaign = pathname.startsWith("/campaigns/");
   return (
@@ -363,7 +350,7 @@ export function Nav() {
       {campaign ? <span className="pill info plain">Campaign</span> : null}
       {me?.signed_in ? (
         <form action="/auth/signout" method="post" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <span className="pill ok plain" title={me.merchant?.name ?? ""}>{me.user?.email ?? "signed in"}</span>
+          <span className="pill ok plain" title={me.user?.email ?? ""}>{me.merchant?.name ?? "Workspace"}</span>
           <button type="submit" className="ghost small">Sign out</button>
         </form>
       ) : me?.auth_configured ? (

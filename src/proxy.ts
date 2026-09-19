@@ -11,8 +11,9 @@ export async function proxy(request: NextRequest) {
   // refresh an existing session cookie. Skipping middleware here makes Google
   // sign-in appear to succeed while leaving the browser anonymous.
   if (appConfig.demoMode) {
+    const isOAuthCallback = request.nextUrl.searchParams.has("neon_auth_session_verifier");
     return auth
-      ? auth.middleware({ loginUrl: pathname || "/" })(request)
+      ? auth.middleware({ loginUrl: isOAuthCallback ? "/login" : pathname || "/" })(request)
       : NextResponse.next({ request });
   }
 
