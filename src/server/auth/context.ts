@@ -40,16 +40,20 @@ export async function requireMerchantContext(db: Db): Promise<MerchantContext> {
   if (user) {
     const id = merchantIdForUser(user.id);
     const existing = await db.one<MerchantRow>(`SELECT id, name, timezone FROM merchant WHERE auth_user_id = $1`, [user.id]);
-    const row =
-      existing ??
-      (await db.one<MerchantRow>(
-        `INSERT INTO merchant (id, name, timezone, default_cap_minor, created_at, auth_user_id, email, phone, created_via)
-         VALUES ($1, $2, 'Asia/Kolkata', 30000, $3, $4, $5, NULL, 'neon_auth')
-         ON CONFLICT (auth_user_id) WHERE auth_user_id IS NOT NULL
-         DO UPDATE SET email = excluded.email, created_via = 'neon_auth'
-         RETURNING id, name, timezone`,
-        [id, user.name?.trim() || "Your workspace", new Date().toISOString(), user.id, user.email],
-      ))!;
+    const defaultName = user.name?.trim() || "Your workspace";
+    const legacyName = user.email ? `${user.email}'s shop` : null;
+    const row = existing
+      ? legacyName && existing.name === legacyName
+        ? (await db.one<MerchantRow>(`UPDATE merchant SET name = $1 WHERE id = $2 RETURNING id, name, timezone`, [defaultName, existing.id]))!
+        : existing
+      : (await db.one<MerchantRow>(
+          `INSERT INTO merchant (id, name, timezone, default_cap_minor, created_at, auth_user_id, email, phone, created_via)
+           VALUES ($1, $2, 'Asia/Kolkata', 30000, $3, $4, $5, NULL, 'neon_auth')
+           ON CONFLICT (auth_user_id) WHERE auth_user_id IS NOT NULL
+           DO UPDATE SET email = excluded.email, created_via = 'neon_auth'
+           RETURNING id, name, timezone`,
+          [id, defaultName, new Date().toISOString(), user.id, user.email],
+        ))!;
     return {
       merchantId: row.id,
       merchantName: row.name,
