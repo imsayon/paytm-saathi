@@ -245,7 +245,7 @@ export async function generateAndImport(
   const generated = generateSyntheticCsv({ merchantId: ctx.merchantId, asOf, seed, customers, absentShare, persona });
 
   if (input.replace) await resetDemoData(db, ctx.merchantId);
-  const result = await importCsv(db, ctx, { content: generated.csv, sourceName: `synthetic-${seed}.csv`, requestId: input.requestId });
+  const result = await importCsv(db, ctx, { content: generated.csv, sourceName: `scenario-${seed}.csv`, requestId: input.requestId });
   await db.run(
     `INSERT INTO synthetic_dataset (id, merchant_id, seed, persona, persona_source, row_count, customer_count, import_batch_id, created_at)
      VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9)`,

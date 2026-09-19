@@ -71,6 +71,10 @@ const GUARANTEES = [
   "Every transition audited in-transaction",
 ];
 
+function displaySourceName(sourceName: string) {
+  return sourceName.replace(/^synthetic-/i, "scenario-");
+}
+
 export default function ImportPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState<{ message: string } | null>(null);
@@ -365,7 +369,7 @@ export default function ImportPage() {
           <div className="kv">
             <span className="key">Last import</span>
             <span className="value">
-              {overview.last_import ? `${overview.last_import.source_name} · ${overview.last_import.row_count} rows` : "None yet"}
+              {overview.last_import ? `${displaySourceName(overview.last_import.source_name)} · ${overview.last_import.row_count} rows` : "None yet"}
             </span>
           </div>
           {overview.last_import ? (
