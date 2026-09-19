@@ -22,9 +22,11 @@ export type AppConfig = {
   twilioSendWaitMs: number;
   /** Public origin of this deployment, used to sign and verify provider webhooks. */
   publicBaseUrl: string | null;
-  /** Supabase Auth (identity only; all data stays in Neon). Publishable key preferred; legacy anon key supported. */
-  supabaseUrl: string | null;
-  supabaseAnonKey: string | null;
+  /** Neon Auth. Identity, sessions and merchant data all stay on Neon. */
+  neonAuthBaseUrl: string | null;
+  neonAuthCookieSecret: string | null;
+  /** Shared secret for Paytm-facing canonical REST/webhook ingestion. */
+  connectorApiKey: string | null;
   /** n8n: where domain events are posted, and the shared secret both directions are signed with. */
   n8nWebhookUrl: string | null;
   n8nSecret: string | null;
@@ -75,8 +77,9 @@ export function loadConfig(): AppConfig {
     twilioFrom: nonEmpty(process.env.TWILIO_FROM),
     twilioSendWaitMs: Number.parseInt(process.env.TWILIO_SEND_WAIT_MS ?? "8000", 10) || 8000,
     publicBaseUrl: nonEmpty(process.env.PUBLIC_BASE_URL)?.replace(/\/+$/, "") ?? null,
-    supabaseUrl: nonEmpty(process.env.NEXT_PUBLIC_SUPABASE_URL),
-    supabaseAnonKey: nonEmpty(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) ?? nonEmpty(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+    neonAuthBaseUrl: nonEmpty(process.env.NEON_AUTH_BASE_URL)?.replace(/\/+$/, "") ?? null,
+    neonAuthCookieSecret: nonEmpty(process.env.NEON_AUTH_COOKIE_SECRET),
+    connectorApiKey: nonEmpty(process.env.SAATHI_CONNECTOR_API_KEY),
     n8nWebhookUrl: nonEmpty(process.env.N8N_WEBHOOK_URL),
     n8nSecret: nonEmpty(process.env.N8N_WEBHOOK_SECRET),
     cogneeBaseUrl: nonEmpty(process.env.COGNEE_BASE_URL)?.replace(/\/+$/, "") ?? null,

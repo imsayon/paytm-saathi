@@ -39,10 +39,13 @@ services:
         value: "true"
       - key: SAATHI_GEMINI_MODEL
         value: gemini-2.5-flash
-      # Supabase Auth identity only. Neon remains the product database.
-      - key: NEXT_PUBLIC_SUPABASE_URL
+      # Neon Auth is branchable identity in the same backend as the product DB.
+      - key: NEON_AUTH_BASE_URL
         sync: false
-      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+      - key: NEON_AUTH_COOKIE_SECRET
+        sync: false
+      # Paytm-facing canonical REST/webhook adapter shared secret.
+      - key: SAATHI_CONNECTOR_API_KEY
         sync: false
       # Neon pooled endpoint (host contains "-pooler"): application traffic.
       - key: DATABASE_URL

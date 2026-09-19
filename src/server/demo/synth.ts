@@ -252,7 +252,7 @@ export async function generateAndImport(
     [newId("syn"), ctx.merchantId, seed, JSON.stringify({ ...persona, customer_names: undefined }), source, generated.rows, generated.customers, result.batchId, new Date().toISOString()],
   );
   if (!ctx.isDemoSession) {
-    await db.run(`UPDATE merchant SET name = $1 WHERE id = $2 AND created_via = 'supabase'`, [`${persona.merchant_name}, ${persona.area}`, ctx.merchantId]);
+    await db.run(`UPDATE merchant SET name = $1 WHERE id = $2 AND created_via = 'neon_auth'`, [`${persona.merchant_name}, ${persona.area}`, ctx.merchantId]);
   }
   await rememberFact(db, {
     merchantId: ctx.merchantId,

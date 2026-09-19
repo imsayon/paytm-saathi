@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { config } from "../config";
 import type { Db } from "../db/client";
 import { AppError } from "../errors";
-import { getSessionUser, supabaseConfigured } from "./supabase";
+import { getSessionUser, neonAuthConfigured } from "./neon";
 
 export const DEMO_MERCHANT_ID = "mch_demo_bengaluru";
 export const DEMO_MERCHANT_NAME = "Chai Point Koramangala (synthetic demo merchant)";
@@ -14,8 +14,8 @@ export type MerchantContext = {
   timezone: string;
   actor: string;
   isDemoSession: boolean;
-  /** Present when a real person is signed in through Supabase. */
-  user: { id: string; email: string | null; phone: string | null } | null;
+  /** Present when a real person is signed in through Neon Auth. */
+  user: { id: string; email: string | null } | null;
 };
 
 type MerchantRow = { id: string; name: string; timezone: string };
@@ -27,9 +27,9 @@ function merchantIdForUser(userId: string): string {
 /**
  * Who is acting, and which merchant's data they may touch.
  *
- * 1. A Supabase session wins: the merchant is looked up by the user's id and
+ * 1. A verified Neon Auth session wins: the merchant is looked up by the user's id and
  *    created on first sign-in (a private, empty workspace named after the
- *    email or phone). Every query downstream is scoped to that merchant id,
+ *    email). Every query downstream is scoped to that merchant id,
  *    so one merchant can never read or approve another's campaign.
  * 2. With no session and demo mode on, the seeded demo merchant is used and
  *    labelled as such.
@@ -44,17 +44,17 @@ export async function requireMerchantContext(db: Db): Promise<MerchantContext> {
       existing ??
       (await db.one<MerchantRow>(
         `INSERT INTO merchant (id, name, timezone, default_cap_minor, created_at, auth_user_id, email, phone, created_via)
-         VALUES ($1, $2, 'Asia/Kolkata', 30000, $3, $4, $5, $6, 'supabase')
+         VALUES ($1, $2, 'Asia/Kolkata', 30000, $3, $4, $5, NULL, 'neon_auth')
          ON CONFLICT (auth_user_id) WHERE auth_user_id IS NOT NULL
-         DO UPDATE SET email = excluded.email, phone = excluded.phone
+         DO UPDATE SET email = excluded.email, created_via = 'neon_auth'
          RETURNING id, name, timezone`,
-        [id, `${user.email ?? user.phone ?? "Merchant"}'s shop`, new Date().toISOString(), user.id, user.email, user.phone],
+        [id, `${user.email ?? "Merchant"}'s shop`, new Date().toISOString(), user.id, user.email],
       ))!;
     return {
       merchantId: row.id,
       merchantName: row.name,
       timezone: row.timezone,
-      actor: user.email ?? user.phone ?? user.id,
+      actor: user.email ?? user.id,
       isDemoSession: false,
       user,
     };
@@ -63,7 +63,7 @@ export async function requireMerchantContext(db: Db): Promise<MerchantContext> {
   if (!config.demoMode) {
     throw new AppError(
       "UNAUTHENTICATED",
-      supabaseConfigured() ? "Sign in to continue." : "No merchant session. Sign-in is not configured and demo mode is off.",
+      neonAuthConfigured() ? "Sign in to continue." : "No merchant session. Neon Auth is not configured and demo mode is off.",
     );
   }
   const row = await db.one<MerchantRow>(`SELECT id, name, timezone FROM merchant WHERE id = $1`, [DEMO_MERCHANT_ID]);

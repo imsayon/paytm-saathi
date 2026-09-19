@@ -71,8 +71,10 @@ async function latestConsentByCustomer(
 ): Promise<Map<string, "true" | "false" | "unknown">> {
   const rows = await db.all<{ customer_id: string; state: "true" | "false" | "unknown" }>(
     `SELECT customer_id, state
-       FROM consent
+      FROM consent
       WHERE merchant_id = $1
+        AND purpose = 'merchant_reengagement'
+        AND (expires_at IS NULL OR expires_at > now())
       ORDER BY observed_at ASC, seq ASC`,
     [merchantId],
   );

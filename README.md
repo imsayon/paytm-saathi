@@ -4,7 +4,7 @@ Paytm Saathi is a merchant-retention workflow for the Paytm Build for India AI H
 
 It helps a small merchant identify repeat customers who stopped returning, filter the audience by consent, propose a budgeted offer, obtain merchant approval, simulate delivery, and measure the result against a holdout group.
 
-> **This is a sandbox SaaS prototype.** The default data is synthetic, the default delivery provider is a mock, and there is no Paytm credential or payment API connected. Supabase can provide email OTP, mobile OTP or Google sign-in; Neon remains the application database. No real customer is contacted unless a team deliberately configures a live provider after approval and pilot review.
+> **This is a sandbox SaaS prototype.** The default data is synthetic, the default delivery provider is a mock, and there is no Paytm credential or payment API connected. Neon Auth provides email/password and Google sign-in, while Neon Postgres stores the product data and retained history. No real customer is contacted unless a team deliberately configures a live provider after approval and pilot review.
 
 ## The one loop this product does
 
@@ -33,7 +33,7 @@ Open http://127.0.0.1:3000 and follow the five numbered steps in the header. The
 
 `pnpm db:seed` is safe to re-run: the import is checksum-idempotent. The import screen also has a **Reset demo data** control that retires the demo merchant's active imports, campaigns, jobs and outcomes so the sequence can be rehearsed again. Audit events, integration events, memory facts and synthetic dataset metadata remain in Neon as retained evidence.
 
-For real sign-in, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in `.env`, then enable only Email, Phone and Google providers in Supabase Auth. The app never uses a Supabase service-role key and stores merchant/payment/campaign data in Neon. If these variables are absent, the labelled synthetic demo session is still available while `SAATHI_DEMO_MODE=true`.
+For real sign-in, enable Neon Auth on the target branch, enable email sign-up/sign-in and Google in Neon Console, then set `NEON_AUTH_BASE_URL` and a private `NEON_AUTH_COOKIE_SECRET` in `.env`. `neon.ts` declares Auth as part of every provisioned branch. The app proxies Auth through Next.js, maps the verified user to a private Neon merchant tenant, and keeps the labelled synthetic demo available while `SAATHI_DEMO_MODE=true`.
 
 Optional, for the model-backed planner and persona generator:
 
@@ -48,6 +48,7 @@ Optional integrations are also safe to omit:
 
 - Import `integrations/n8n/paytm-saathi-event-router.json` into n8n and set `N8N_WEBHOOK_URL` plus `N8N_WEBHOOK_SECRET` to receive signed, aggregate-only domain events. n8n can notify an operator or write a decision log; it cannot approve, select recipients, override consent or call the provider.
 - Set `COGNEE_API_KEY` (and optionally `COGNEE_BASE_URL`) to mirror decision-level memory. Neon is authoritative and the product remains usable when Cognee is unavailable.
+- Paytm-facing systems can post normalized payment and consent events to `POST /api/connectors/paytm/events`. Requests use HMAC headers (`x-saathi-timestamp` and `x-saathi-signature`), event IDs are retained in Neon for idempotency, and the endpoint stops at ingestion — it cannot approve or send a campaign.
 
 The core app, worker, scripts and tests are TypeScript. Gemini uses the installed OpenAI SDK against Google's compatibility endpoint; requests do not go to OpenAI. The default verified model is `gemini-2.5-flash`; override it with `SAATHI_GEMINI_MODEL`.
 
@@ -117,7 +118,8 @@ db/migrations/           Schema as numbered SQL files, applied by scripts/migrat
 src/app/                 Next.js 16 routes: 5 merchant screens + the API
 src/server/
   config.ts              Environment configuration (pooled URL for the app, direct URL for migrations)
-  auth/                  Supabase SSR identity lookup and merchant tenant mapping
+  auth/                  Neon Auth session verification and merchant tenant mapping
+  connectors/            Canonical Paytm-shaped event validation, HMAC and ingestion
   db/                    pg client, transaction helper, migration runner
   importer/              CSV parsing, validation, atomic checksum-idempotent import
   domain/
@@ -182,7 +184,7 @@ Three things it deliberately does not claim:
 
 ## Security and trust
 
-Tenant-scoped reads and writes with cross-merchant authorization tests; Supabase-verified sessions mapped to a stable Neon merchant tenant; a labelled demo fallback that refuses to resolve when demo mode is off; upload size and row limits; strict parsing of money, dates and states; neutralised spreadsheet formula content; masked identifiers in the UI and logs; redacted log fields; rate limits on import and preview; aggregate-only planner input; untrusted merchant intent delimited inside a fixed system instruction; no model tools; environment-based secrets. The Next.js proxy refreshes Supabase cookies, while route authorization uses the verified user rather than an unverified session payload.
+Tenant-scoped reads and writes with Neon-verified sessions mapped to a stable Neon merchant tenant; a labelled demo fallback that refuses to resolve when demo mode is off; upload size and row limits; strict parsing of money, dates and states; neutralised spreadsheet formula content; masked identifiers in the UI and logs; redacted log fields; rate limits on import and preview; aggregate-only planner input; untrusted merchant intent delimited inside a fixed system instruction; no model tools; environment-based secrets. The Next.js proxy refreshes Neon Auth cookies, while route authorization uses the verified user rather than an unverified session payload. The canonical connector additionally requires a short-lived HMAC signature and retains source event IDs.
 
 The demo endpoints under `/api/demo/` and `/api/campaigns/{id}/demo/` are refused unless `SAATHI_DEMO_MODE=true`. Connection strings live only in `.env` (git-ignored) or deployment secrets; the health endpoint reports the database host, never credentials.
 
@@ -194,6 +196,7 @@ The demo endpoints under `/api/demo/` and `/api/campaigns/{id}/demo/` are refuse
 | `POST /api/synthetic/generate` | Generate and import a new seeded fictional dataset |
 | `GET /api/overview` | Merchant, last import, signal, campaigns, retained memory and integration status |
 | `GET /api/me` | Current sign-in/merchant status without exposing credentials |
+| `POST /api/connectors/paytm/events` | HMAC-authenticated canonical payment and consent ingestion boundary |
 | `POST /api/campaigns/preview` | Draft a campaign from an intent (creates version 1) |
 | `GET /api/campaigns/{id}` | Current version, rules, groups, jobs, audit |
 | `POST /api/campaigns/{id}/revise` | Merchant edit; creates the next version |
@@ -223,7 +226,7 @@ No live Paytm integration or credentials. No real SMS, WhatsApp, email or custom
 
 ## Limitations
 
-- Supabase Auth is an identity boundary, not a Paytm identity or payment-data grant. The deployment still needs its email, SMS and Google provider settings, redirect URLs, rate limits and abuse controls configured by the operator.
+- Neon Auth is an identity boundary, not a Paytm identity or payment-data grant. The deployment still needs its email and Google provider settings, trusted domains, redirect URLs, rate limits and abuse controls configured by the operator.
 - A signed-in merchant gets an isolated Neon tenant, but Neon branch, backups, retention/deletion, encryption, RLS posture and operational access still need a production security review before a pilot.
 - Paytm data access is intentionally not guessed or scraped. A pilot needs Paytm-approved API/export scopes, merchant consent, field mapping, webhook authenticity/idempotency, retention/deletion rules and a test/sandbox contract from the Paytm tech team.
 - Consent, DLT/template, opt-out, sender reputation and provider onboarding constraints remain external operational requirements for any real messaging channel.
@@ -250,15 +253,15 @@ Additional limits: the CSV reader is line-oriented and does not support quoted m
 
 ## Deploy to Render
 
-[`render.yaml`](render.yaml) describes one web service (Node, Singapore region, `free` plan). In the Render dashboard choose **New → Blueprint**, pick this repository and branch `main`; Render reads the file and asks for the connection strings and optional keys marked `sync: false`. At minimum provide `DATABASE_URL` (pooled) and `DATABASE_URL_UNPOOLED` (direct); add Supabase publishable-key, Gemini, n8n, Cognee or Twilio values only when that integration is configured.
+[`render.yaml`](render.yaml) describes one web service (Node, Singapore region, `free` plan). In the Render dashboard choose **New → Blueprint**, pick this repository and branch `main`; Render reads the file and asks for the connection strings and optional keys marked `sync: false`. At minimum provide `DATABASE_URL` (pooled), `DATABASE_URL_UNPOOLED` (direct), `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET` and `SAATHI_CONNECTOR_API_KEY`; add Gemini, n8n, Cognee or Twilio values only when that integration is configured.
 
 What the Blueprint does differently from a local run:
 
 - The start command binds to `0.0.0.0` (Render's port scan needs it); `pnpm start` keeps the loopback binding for local demos.
 - `pnpm db:migrate` runs at the end of the build, because pre-deploy commands are paid-only on Render. It is idempotent and takes an advisory lock, so a rebuild against an already-migrated database is a no-op.
 - The health check is `/api/readyz`, so a deploy never goes live until every migration is recorded.
-- `SAATHI_DEMO_MODE=true` keeps a frictionless synthetic judge path. Anyone with the URL can use the demo controls, including **Reset demo data**; use a disposable database for judging. For an auth-only pilot, set it to `false` after Supabase providers and redirect URLs are configured.
-- The Blueprint includes optional `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `N8N_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET` and `COGNEE_API_KEY` variables. Leave optional integrations empty and the core app still works; do not add service-role keys to Render.
+- `SAATHI_DEMO_MODE=true` keeps a frictionless synthetic judge path. Anyone with the URL can use the demo controls, including **Reset demo data**; use a disposable database for judging. For an auth-only pilot, set it to `false` after Neon Auth providers and trusted domains are configured.
+- The Blueprint includes `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`, `SAATHI_CONNECTOR_API_KEY`, `N8N_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET` and `COGNEE_API_KEY` variables. Leave optional integrations empty and the core app still works; never put a database password or provider secret in the repository.
 
 Seed once after the first deploy if the database is empty: run `pnpm db:seed` locally against the same `DATABASE_URL`. The free plan sleeps after fifteen idle minutes and takes about a minute to wake; switch `plan` to `starter` for a live stage demo.
 

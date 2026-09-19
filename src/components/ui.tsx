@@ -329,7 +329,7 @@ export function ThemeToggle() {
   );
 }
 
-type Me = { signed_in: boolean; auth_configured: boolean; merchant: { name: string; demo_session: boolean } | null; user: { email: string | null; phone: string | null } | null };
+type Me = { signed_in: boolean; auth_configured: boolean; merchant: { name: string; demo_session: boolean } | null; user: { email: string | null } | null };
 
 export function Nav() {
   const pathname = usePathname();
@@ -363,7 +363,7 @@ export function Nav() {
       {campaign ? <span className="pill info plain">Campaign</span> : null}
       {me?.signed_in ? (
         <form action="/auth/signout" method="post" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <span className="pill ok plain" title={me.merchant?.name ?? ""}>{me.user?.email ?? me.user?.phone ?? "signed in"}</span>
+          <span className="pill ok plain" title={me.merchant?.name ?? ""}>{me.user?.email ?? "signed in"}</span>
           <button type="submit" className="ghost small">Sign out</button>
         </form>
       ) : me?.auth_configured ? (

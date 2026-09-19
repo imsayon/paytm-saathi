@@ -75,6 +75,8 @@ async function claimJob(db: Db, workerId: string): Promise<JobRow | null> {
                 (SELECT a.id FROM campaign_approval a WHERE a.version_id = j.version_id AND a.status = 'active' LIMIT 1) AS approval_id,
                 (SELECT cs.state FROM consent cs
                   WHERE cs.merchant_id = j.merchant_id AND cs.customer_id = j.customer_id
+                    AND cs.purpose = 'merchant_reengagement'
+                    AND (cs.expires_at IS NULL OR cs.expires_at > now())
                   ORDER BY cs.observed_at DESC, cs.seq DESC LIMIT 1) AS consent_state,
                 (SELECT a.provider_message_id FROM delivery_attempt a
                   WHERE a.job_id = j.id AND a.provider_message_id IS NOT NULL
