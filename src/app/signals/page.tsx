@@ -95,7 +95,7 @@ export default function SignalsPage() {
         <div className="card" data-reveal>
           <h2>No payment data imported</h2>
           <p className="muted" style={{ marginBottom: 0 }}>
-            <a href="/">Load the demo CSV</a> first — the audience is derived from settled payments.
+            <a href="/">Load sample data</a> first — the audience is derived from settled payments.
           </p>
         </div>
       </Reveal>
@@ -181,8 +181,8 @@ export default function SignalsPage() {
           </div>
           <SplitMeter campaign={campaignSize} holdout={holdoutSize} />
           <p className="tiny muted">
-            The holdout receives nothing at all — no message and no delivery job. It supplies a comparison baseline; this small
-            synthetic cohort cannot establish causal impact.
+            The holdout receives nothing at all — no message and no delivery job. It supplies a comparison baseline; this report is
+            descriptive and not a causal estimate.
           </p>
           <div className="field" style={{ marginTop: 14 }}>
             <label htmlFor="intent">Merchant intent</label>

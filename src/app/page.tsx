@@ -44,7 +44,7 @@ const RAIL: RailStage[] = [
   { key: "draft", title: "Draft", detail: "aggregates only", glyph: <path d="M4 20l4.5-1 10-10-3.5-3.5-10 10L4 20zM13 7.5l3.5 3.5" /> },
   { key: "review", title: "Review", detail: "eight rule checks", glyph: <path d="M12 3l7 3v5.5c0 4.4-3 8.1-7 9.5-4-1.4-7-5.1-7-9.5V6l7-3z" /> },
   { key: "approve", title: "Approve", detail: "the human gate", glyph: <path d="M9 11V6a3 3 0 016 0v5h3l1 5H5l1-5h3zM6 20h12" />, gate: true },
-  { key: "deliver", title: "Mock delivery", detail: "idempotent jobs", glyph: <path d="M3 11.5l18-8-8 18-2.5-7.5L3 11.5z" /> },
+  { key: "deliver", title: "Delivery", detail: "idempotent jobs", glyph: <path d="M3 11.5l18-8-8 18-2.5-7.5L3 11.5z" /> },
   { key: "report", title: "Holdout report", detail: "campaign vs control", glyph: <path d="M4 20V10M10 20V4M16 20v-8M22 20H2" /> },
 ];
 
@@ -69,7 +69,6 @@ const GUARANTEES = [
   "Idempotency-Key on every approval",
   "Status check before any retry",
   "Every transition audited in-transaction",
-  "Synthetic data · descriptive, not causal",
 ];
 
 export default function ImportPage() {
@@ -115,7 +114,7 @@ export default function ImportPage() {
       );
       setFlash(
         result.import.already_imported
-          ? "Already imported: the checksum matched, so nothing was written twice."
+          ? "Already loaded: the checksum matched, so nothing was written twice."
           : `Imported ${result.import.row_count} rows for ${result.import.customer_count} customers.`,
       );
       await load();
@@ -127,7 +126,7 @@ export default function ImportPage() {
   }
 
   async function resetDemo() {
-    if (!window.confirm("Clear the demo merchant's imports, campaigns, jobs and outcomes so the demo can start again?")) {
+    if (!window.confirm("Clear this workspace's imports, campaigns, jobs and outcomes so you can start again?")) {
       return;
     }
     setBusy("reset");
@@ -135,7 +134,7 @@ export default function ImportPage() {
     setFlash(null);
     try {
       await apiCall("/api/demo/reset", { method: "POST", body: "{}" });
-      setFlash("Demo data cleared. Load the demo CSV to start again.");
+      setFlash("Workspace data cleared. Load the sample data to start again.");
       await load();
     } catch (caught) {
       setUploadError((caught as Error).message);
@@ -189,7 +188,7 @@ export default function ImportPage() {
       const persona = result.synthetic.persona;
       const rowCount = result.synthetic.import.rowCount ?? result.synthetic.import.row_count ?? 0;
       const customerCount = result.synthetic.import.customerCount ?? result.synthetic.import.customer_count ?? customers;
-      const source = result.synthetic.persona_source === "model" ? "Gemini-shaped persona" : "deterministic persona";
+      const source = result.synthetic.persona_source === "model" ? "AI-assisted profile" : "rules-based profile";
       setFlash(`Generated ${persona.merchant_name ?? "a fresh merchant"} · ${customerCount} customers · ${rowCount} payments · ${source}.`);
       await load();
     } catch (caught) {
@@ -225,7 +224,7 @@ export default function ImportPage() {
           <div className="actions">
             <button onClick={importFixture} disabled={busy !== null}>
               {busy === "import" ? <span className="spinner" /> : <Icon name="file" size={16} />}
-              Load demo CSV
+              Load sample data
             </button>
             <label className="btn secondary" style={{ marginBottom: 0, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1 }}>
               {busy === "upload" ? <span className="spinner" /> : <Icon name="upload" size={16} />}
@@ -253,10 +252,10 @@ export default function ImportPage() {
               <b>{overview.last_import ? overview.last_import.row_count : 243}</b> payment rows
             </div>
             <div className="hero-stat">
-              <b>{signal ? signal.total_customers : 78}</b> synthetic customers
+              <b>{signal ? signal.total_customers : 78}</b> customers
             </div>
             <div className="hero-stat">
-              <b>{Number(overview.integrations.n8n.configured) + Number(overview.integrations.cognee.configured)}</b> optional integrations
+              <b>{Number(overview.integrations.n8n.configured) + Number(overview.integrations.cognee.configured)}</b> connected services
             </div>
             <div className="hero-stat">
               <b>1</b> human approval gate
@@ -281,18 +280,18 @@ export default function ImportPage() {
         <TiltCard className="card" data-reveal>
           <div className="page-head" style={{ marginBottom: 8 }}>
             <div>
-              <div className="eyebrow" style={{ marginBottom: 4 }}><span className="blink" /> synthetic studio</div>
-              <h2 style={{ margin: 0 }}>Make the demo data move</h2>
+              <div className="eyebrow" style={{ marginBottom: 4 }}><span className="blink" /> scenario studio</div>
+              <h2 style={{ margin: 0 }}>Build a fresh scenario</h2>
             </div>
-            <span className="pill info plain">seeded + reproducible</span>
+            <span className="pill info plain">repeatable</span>
           </div>
           <p className="tiny muted" style={{ marginTop: 0 }}>
-            Every seed creates a different fictional merchant, customer mix, payment history and retention signal. Gemini may name
-            the persona; rules generate the numbers, consent and exclusions.
+            Create a new merchant profile, customer mix, payment history and retention signal. The same scenario key reproduces the
+            same result; rules own the numbers, consent and exclusions.
           </p>
           <div className="two-col">
             <div className="field">
-              <label htmlFor="synthetic-seed">Seed</label>
+              <label htmlFor="synthetic-seed">Scenario key</label>
               <input id="synthetic-seed" type="number" min="1" max="2147483647" value={syntheticSeed} onChange={(event) => setSyntheticSeed(event.target.value)} />
             </div>
             <div className="field">
@@ -300,7 +299,7 @@ export default function ImportPage() {
               <input id="synthetic-customers" type="number" min="20" max="400" value={syntheticCustomers} onChange={(event) => setSyntheticCustomers(event.target.value)} />
             </div>
             <div className="field">
-              <label htmlFor="synthetic-absent-share">Absent regulars (%)</label>
+              <label htmlFor="synthetic-absent-share">Quiet regulars (%)</label>
               <input id="synthetic-absent-share" type="number" min="10" max="50" value={syntheticAbsentShare} onChange={(event) => setSyntheticAbsentShare(event.target.value)} />
             </div>
           </div>
@@ -316,24 +315,24 @@ export default function ImportPage() {
 
         <TiltCard className="card" data-reveal>
           <div className="page-head" style={{ marginBottom: 8 }}>
-            <h2 style={{ margin: 0 }}>Retained context</h2>
+            <h2 style={{ margin: 0 }}>Workspace context</h2>
             <span className="pill neutral plain">Neon record</span>
           </div>
           {overview.latest_synthetic ? (
             <>
               <h3 style={{ marginTop: 0 }}>{overview.latest_synthetic.persona.merchant_name ?? "Generated merchant"}</h3>
               <p className="tiny muted" style={{ marginTop: 0 }}>
-                {overview.latest_synthetic.persona.area ?? "Neighbourhood"}, {overview.latest_synthetic.persona.city ?? "India"} · seed <code>{overview.latest_synthetic.seed}</code>
+                {overview.latest_synthetic.persona.area ?? "Neighbourhood"}, {overview.latest_synthetic.persona.city ?? "India"} · scenario <code>{overview.latest_synthetic.seed}</code>
               </p>
-              <div className="kv"><span className="key">Latest active dataset</span><span className="value">{overview.latest_synthetic.customer_count} customers · {overview.latest_synthetic.row_count} payments</span></div>
+              <div className="kv"><span className="key">Active dataset</span><span className="value">{overview.latest_synthetic.customer_count} customers · {overview.latest_synthetic.row_count} payments</span></div>
             </>
           ) : (
-            <p className="muted">Generate a dataset to create a new active merchant story.</p>
+            <p className="muted">Generate a scenario to create an active merchant workspace.</p>
           )}
           <div className="kv"><span className="key">Saathi memory</span><span className="value">{overview.memory.facts} retained fact{overview.memory.facts === 1 ? "" : "s"}</span></div>
-          <div className="kv"><span className="key">n8n event bridge</span><span className="value">{overview.integrations.n8n.configured ? `${overview.integrations.n8n.pending_events} pending` : "not configured"}</span></div>
-          <div className="kv"><span className="key">Cognee mirror</span><span className="value">{overview.integrations.cognee.configured ? "configured" : "Neon fallback"}</span></div>
-          <p className="note" style={{ marginBottom: 0 }}>Resets retire active rows but preserve audit, integration events, memory and dataset history.</p>
+          <div className="kv"><span className="key">Workflow automation</span><span className="value">{overview.integrations.n8n.configured ? `${overview.integrations.n8n.pending_events} pending` : "standby"}</span></div>
+          <div className="kv"><span className="key">Memory sync</span><span className="value">{overview.integrations.cognee.configured ? "Neon + semantic mirror" : "Neon"}</span></div>
+          <p className="note" style={{ marginBottom: 0 }}>Resetting active data preserves the decision history, integrations, memory and scenario history.</p>
         </TiltCard>
       </div>
 
@@ -357,10 +356,10 @@ export default function ImportPage() {
           <h3>Merchant</h3>
           <h2 style={{ fontSize: 21 }}>{overview.merchant.name}</h2>
           <p className="tiny" style={{ margin: "4px 0 12px" }}>
-            {overview.merchant.timezone} · demo session <code>{overview.merchant.id}</code>
+            {overview.merchant.timezone} · workspace <code>{overview.merchant.id}</code>
           </p>
           <div className="kv">
-            <span className="key">Fixed demo date (as of)</span>
+            <span className="key">Reporting as of</span>
             <span className="value">{overview.demo.as_of}</span>
           </div>
           <div className="kv">
@@ -382,8 +381,8 @@ export default function ImportPage() {
         <TiltCard className="card" data-reveal>
           <h3>Step 1 — load payment data</h3>
           <p className="tiny muted" style={{ marginTop: 0 }}>
-            The fixture is a frozen synthetic CSV for one Bengaluru merchant: 243 payment rows including refunded and duplicate
-            rows. Re-importing the same file is safe: the checksum makes it idempotent.
+            Load the starter CSV or connect a payment feed. It includes settled, refunded and duplicate rows so the signal can be
+            checked end to end. Re-importing the same file is safe: the checksum makes it idempotent.
           </p>
           <p className="note">
             Required columns: <code>merchant_id</code>, <code>customer_id</code>, <code>paid_at</code>, <code>amount_minor</code>,{" "}
@@ -394,9 +393,9 @@ export default function ImportPage() {
             <div className="actions" style={{ marginTop: 14 }}>
               <button className="secondary small" onClick={resetDemo} disabled={busy !== null}>
                 {busy === "reset" ? <span className="spinner" /> : <Icon name="refresh" size={14} />}
-                Reset demo data
+                Reset workspace
               </button>
-              <span className="tiny muted">Demo control. Clears this merchant&apos;s data from the shared database.</span>
+              <span className="tiny muted">Clears active workspace data while retaining the decision history.</span>
             </div>
           ) : null}
         </TiltCard>
@@ -430,7 +429,7 @@ export default function ImportPage() {
         <div className="card" style={{ marginTop: 20 }} data-reveal>
           <h2>No payment data yet</h2>
           <p className="muted" style={{ margin: 0 }}>
-            Load the demo CSV to compute the retention signal.
+            Load payment data to compute the retention signal.
           </p>
         </div>
       )}

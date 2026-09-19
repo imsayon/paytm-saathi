@@ -51,7 +51,10 @@ export default function LoginPage() {
     setError(null);
     try {
       const result = await neonAuthClient.signIn.social({ provider: "google", callbackURL: "/" });
-      if (result.error) setError(result.error.message ?? "Google sign-in failed.");
+      if (result.error) {
+        setError(result.error.message ?? "Google sign-in failed.");
+        setBusy(false);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Google sign-in failed.");
       setBusy(false);
@@ -68,17 +71,13 @@ export default function LoginPage() {
           <SplitText text="Your shop," accent="your data." />
         </h1>
         <p className="lede">
-          Sign in to get a private workspace. Every campaign, approval and report is scoped to your merchant account; nothing here is
-          shared with the synthetic demo merchant.
+          Sign in to open a private workspace. Campaigns, approvals and reports stay scoped to your merchant account.
         </p>
       </div>
 
       {configured === false ? (
         <div data-reveal>
-          <Banner tone="warn" icon="alert">
-            Neon Auth is not configured on this deployment. The labelled <a href="/">synthetic demo</a> is still available while the
-            Paytm connector is being wired.
-          </Banner>
+          <Banner tone="warn" icon="alert">Authentication is temporarily unavailable. Please try again shortly.</Banner>
         </div>
       ) : (
         <div className="grid two">
@@ -120,14 +119,14 @@ export default function LoginPage() {
 
           <TiltCard className="card" data-reveal>
             <h3>Or continue with Google</h3>
-            <p className="tiny muted" style={{ marginTop: 0 }}>Neon Auth handles the OAuth session. Saathi stores only the merchant identity link in Neon.</p>
+            <p className="tiny muted" style={{ marginTop: 0 }}>Use your Google account to open the same private workspace.</p>
             <button className="secondary" onClick={() => void google()} disabled={busy}>
               <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 01-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.4z"/><path fill="#34A853" d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0012 22z"/><path fill="#FBBC05" d="M6.4 14a6 6 0 010-3.9V7.5H3.1a10 10 0 000 9l3.3-2.5z"/><path fill="#EA4335" d="M12 6c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 003.1 7.5L6.4 10c.8-2.3 3-4 5.6-4z"/></svg>
               Continue with Google
             </button>
             <div className="divider" />
             <p className="tiny muted" style={{ margin: 0 }}>
-              Prefer to look around first? The <a href="/">synthetic demo</a> needs no sign-in and never contacts a real customer.
+              Need a quick look first? Open the <a href="/">preview workspace</a>.
             </p>
           </TiltCard>
         </div>

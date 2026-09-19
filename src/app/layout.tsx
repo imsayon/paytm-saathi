@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Paytm Saathi",
-  description: "Bounded merchant-retention workflow: signal, plan, approval, mock delivery, holdout report.",
+  description: "Merchant retention workflow: signal, plan, approval, delivery, measurement.",
 };
 
 export const viewport: Viewport = {
@@ -38,8 +38,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="shell">{children}</main>
         <footer className="footer">
           <div className="inner">
-            <span>synthetic demo · no live paytm integration · no real customer is contacted</span>
-            <span>rules own eligibility, consent, budget and state · the model only drafts</span>
+            <span>Saathi · merchant retention workspace</span>
+            <span>AI drafts · rules decide · you approve</span>
           </div>
         </footer>
       </body>

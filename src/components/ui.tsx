@@ -161,7 +161,7 @@ export function Steps({ current, campaignId }: { current: StepId; campaignId?: s
     { id: "import", label: "Import", href: "/" },
     { id: "signal", label: "Signal", href: "/signals" },
     { id: "review", label: "Review & approve", href: campaignId ? `/campaigns/${campaignId}/review` : null },
-    { id: "delivery", label: "Mock delivery", href: campaignId ? `/campaigns/${campaignId}/status` : null },
+    { id: "delivery", label: "Delivery", href: campaignId ? `/campaigns/${campaignId}/status` : null },
     { id: "outcome", label: "Holdout report", href: campaignId ? `/campaigns/${campaignId}/outcome` : null },
   ];
   const activeIndex = steps.findIndex((step) => step.id === current);
@@ -195,12 +195,12 @@ export function DemoBanner({ planner }: { planner?: string }) {
     <div className="demo-flag" data-reveal>
       <Icon name="shield" />
       <div>
-        <strong>Sandbox boundary.</strong> Synthetic data, a human approval gate, and aggregate-only AI planning. Paytm credentials
-        are not connected; delivery is mock unless a live provider is explicitly configured after approval.
+        <strong>Workspace safeguards.</strong> Human approval is required before any provider call. Consent, budget and recipient
+        rules are enforced server-side; AI drafts copy but never selects recipients or approves campaigns.
         {planner ? (
           <>
             {" "}
-            Planner: <code>{planner === "gemini" ? "Gemini (configured; draft source shown on review)" : "deterministic template fallback"}</code>.
+            Planner: <code>{planner === "gemini" ? "Gemini" : "rule-based"}</code>.
           </>
         ) : null}
       </div>

@@ -5,7 +5,7 @@ import { AppError } from "../errors";
 import { getSessionUser, neonAuthConfigured } from "./neon";
 
 export const DEMO_MERCHANT_ID = "mch_demo_bengaluru";
-export const DEMO_MERCHANT_NAME = "Chai Point Koramangala (synthetic demo merchant)";
+export const DEMO_MERCHANT_NAME = "Chai Point Koramangala";
 export const DEMO_APPROVER = "demo-merchant-owner";
 
 export type MerchantContext = {

@@ -109,9 +109,9 @@ test("opt-outs are counted across both groups", async () => {
   assert.equal(report.opt_outs, 1);
 });
 
-test("the report always carries the synthetic and proxy caveats", async () => {
+test("the report always carries the descriptive and proxy caveats", async () => {
   const report = await reportFor([{ group: "campaign", returned: true, reward: 1500 }]);
-  assert.ok(report.caveats.some((caveat) => caveat.toLowerCase().includes("synthetic")));
+  assert.ok(report.caveats.some((caveat) => caveat.toLowerCase().includes("descriptive")));
   assert.ok(report.caveats.some((caveat) => caveat.toLowerCase().includes("not profit")));
   assert.ok(Object.keys(report.formulas).length >= 5);
 });

@@ -108,7 +108,7 @@ export async function buildReport(db: Db, campaignId: string, versionId: string)
       contribution_proxy: "incremental payment volume - reward cost",
     },
     caveats: [
-      "Synthetic, fixed-seed simulation on demo data. Descriptive comparison only, not proven causal impact.",
+      "This controlled comparison is descriptive only; it is not proof of causal impact.",
       "Contribution proxy is payment volume after reward. Merchant margin, messaging cost and support cost are unavailable, so this is not profit.",
       "The simulator scripts returns only for delivered campaign messages. Real customers can return without receiving an offer; this is not an attribution model.",
       "Group sizes are small, so the difference is illustrative rather than statistically powered.",

@@ -106,7 +106,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   const approved = detail.approval !== null;
   const rewardMinorDraft = Math.round(Number(rewardRupees) * 100);
   const sourcePill =
-    detail.proposal.copy_source === "merchant" ? "merchant edited" : detail.version.ai_source === "model" ? "model" : "template fallback";
+    detail.proposal.copy_source === "merchant" ? "merchant edited" : detail.version.ai_source === "model" ? "AI draft" : "rule-based draft";
 
   return (
     <Reveal ready refreshKey={`${detail.version.id}:${approved}`}>
@@ -131,7 +131,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
         {rules.eligible ? (
           <Banner tone="ok" icon="check">
             <strong>All deterministic checks pass.</strong> Approving locks version {detail.campaign.current_version} and queues{" "}
-            {rules.campaign_group_size} mock delivery jobs. The {rules.holdout_group_size} holdout customers get nothing.
+            {rules.campaign_group_size} delivery jobs. The {rules.holdout_group_size} holdout customers get nothing.
           </Banner>
         ) : (
           <Banner tone="bad" icon="alert">
@@ -160,7 +160,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
           <p className="tiny muted" style={{ marginTop: 0 }}>
             {detail.version.ai_source === "model"
               ? "The original draft used Gemini and aggregate cohort facts only."
-              : "The original draft used a deterministic template; no model generated it."}{" "}
+              : "The original draft used a rule-based template."}{" "}
             Merchant edits are saved separately. Rules choose recipients and enforce consent and the cap.
           </p>
 

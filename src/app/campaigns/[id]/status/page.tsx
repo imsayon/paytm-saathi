@@ -91,7 +91,7 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
 
       <div data-reveal>
         <div className="eyebrow">
-          <span className="blink" /> Step 4 · mock delivery
+          <span className="blink" /> Step 4 · delivery
         </div>
         <div className="page-head">
           <h1>
@@ -100,9 +100,9 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
           <StatusPill status={detail.campaign.status} />
           <span className="pill neutral plain">version {detail.campaign.current_version}</span>
           {detail.provider.live ? (
-            <span className="pill bad">provider: {detail.provider.name} · live messages</span>
+            <span className="pill bad">provider: {detail.provider.name} · live</span>
           ) : (
-            <span className="pill warn plain">provider: {detail.provider.name} (no real messages)</span>
+            <span className="pill warn plain">preview provider</span>
           )}
         </div>
         <p className="lede">
@@ -123,7 +123,7 @@ export default function StatusPage({ params }: { params: Promise<{ id: string }>
           <span className={`radar${busy ? " on" : ""}`}>
             <button onClick={runDelivery} disabled={busy}>
               {busy ? <span className="spinner" /> : <Icon name="send" size={16} />}
-              Run mock delivery
+              Run delivery
             </button>
           </span>
           <a className="btn secondary" href={`/campaigns/${id}/outcome`}>

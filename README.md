@@ -253,7 +253,7 @@ Additional limits: the CSV reader is line-oriented and does not support quoted m
 
 ## Deploy to Render
 
-[`render.yaml`](render.yaml) describes one web service (Node, Singapore region, `free` plan). In the Render dashboard choose **New → Blueprint**, pick this repository and branch `main`; Render reads the file and asks for the connection strings and optional keys marked `sync: false`. At minimum provide `DATABASE_URL` (pooled), `DATABASE_URL_UNPOOLED` (direct), `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET` and `SAATHI_CONNECTOR_API_KEY`; add Gemini, n8n, Cognee or Twilio values only when that integration is configured.
+[`render.yaml`](render.yaml) describes one web service (Node, Singapore region, `free` plan). In the Render dashboard choose **New → Blueprint**, pick this repository and branch `main`; Render reads the file and asks for the connection strings and optional keys marked `sync: false`. At minimum provide `DATABASE_URL` (pooled), `DATABASE_URL_UNPOOLED` (direct), `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET` and `SAATHI_CONNECTOR_API_KEY`; add Gemini, n8n, Cognee or Twilio values only when that integration is configured. For Cognee Cloud, set `COGNEE_BASE_URL` to the per-tenant URL shown on the Cognee API Keys page and set `COGNEE_API_KEY` as a secret.
 
 What the Blueprint does differently from a local run:
 

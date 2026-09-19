@@ -86,8 +86,8 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
           <span className="pill neutral plain">version {data.version.version}</span>
         </div>
         <p className="lede">
-          Compare campaign returns with an untouched holdout. These synthetic results demonstrate the calculation; they do not
-          establish how many real customers an offer would bring back.
+          Compare campaign returns with an untouched holdout. The report is descriptive and shows how the measurement is calculated;
+          it is not a causal estimate.
         </p>
       </div>
 
@@ -96,13 +96,13 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
           <span className={`radar${busy ? " on" : ""}`}>
             <button onClick={runOutcome} disabled={busy}>
               {busy ? <span className="spinner" /> : <Icon name="clock" size={16} />}
-              {report.has_outcomes ? "Re-run seven-day simulation" : "Advance demo clock seven days"}
+              {report.has_outcomes ? "Re-run outcome window" : "Advance outcome window seven days"}
             </button>
           </span>
           <a className="btn secondary" href={`/campaigns/${id}/status`}>
             Back to delivery
           </a>
-          <span className="tiny muted">Simulation is idempotent: re-running does not create duplicate outcomes or change the numbers.</span>
+          <span className="tiny muted">Re-running is idempotent: it does not create duplicate outcomes or change the numbers.</span>
         </div>
         <div style={{ marginTop: 12 }}>
           <ErrorBanner error={error} />
@@ -113,7 +113,7 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
         <div className="card" data-reveal>
           <h2>No outcome window yet</h2>
           <p className="muted" style={{ marginBottom: 0 }}>
-            Run mock delivery, then advance the demo clock to materialize the seven-day window.
+            Run delivery, then advance the outcome window to materialize the seven-day report.
           </p>
         </div>
       ) : (
@@ -147,7 +147,7 @@ export default function OutcomePage({ params }: { params: Promise<{ id: string }
             </TiltCard>
 
             <TiltCard className="card" data-reveal>
-              <h3>Money (synthetic)</h3>
+              <h3>Commercial impact</h3>
               <KeyValue label="Campaign return volume" value={rupees(report.campaign.return_volume_minor)} />
               <KeyValue
                 label="Expected baseline volume"

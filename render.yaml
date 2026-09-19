@@ -75,6 +75,6 @@ services:
         sync: false
       # Optional Cognee memory mirror. Neon is authoritative if this is absent.
       - key: COGNEE_BASE_URL
-        value: https://api.cognee.ai
+        sync: false
       - key: COGNEE_API_KEY
         sync: false

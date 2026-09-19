@@ -3,11 +3,19 @@ import { getNeonAuth } from "@/server/auth/neon";
 import { config as appConfig } from "@/server/config";
 
 export async function proxy(request: NextRequest) {
-  // The public hackathon demo intentionally remains explorable without an
-  // account. A non-demo deployment uses Neon Auth middleware as the perimeter.
-  if (appConfig.demoMode) return NextResponse.next({ request });
-
   const pathname = request.nextUrl.pathname;
+  const auth = getNeonAuth();
+
+  // The public preview remains explorable without an account, but Neon Auth
+  // still needs to see every request so it can exchange the OAuth verifier and
+  // refresh an existing session cookie. Skipping middleware here makes Google
+  // sign-in appear to succeed while leaving the browser anonymous.
+  if (appConfig.demoMode) {
+    return auth
+      ? auth.middleware({ loginUrl: pathname || "/" })(request)
+      : NextResponse.next({ request });
+  }
+
   if (
     pathname === "/login" ||
     pathname === "/api/healthz" ||
@@ -17,7 +25,6 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
-  const auth = getNeonAuth();
   return auth ? auth.middleware({ loginUrl: "/login" })(request) : NextResponse.next({ request });
 }
 

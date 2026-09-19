@@ -259,7 +259,7 @@ test("reclaimed lease checks delivery status even when the crashed worker never 
 
 test("pending delivery cannot freeze an incomplete outcome report", async () => {
   const { db,ctx,campaignId }=await approvedCampaign();
-  await assert.rejects(runOutcomeSimulation(db,ctx,campaignId),/Finish mock delivery/);
+  await assert.rejects(runOutcomeSimulation(db,ctx,campaignId),/Finish delivery/);
   assert.equal(await count(db,`SELECT COUNT(*)::int AS n FROM outcome`),0);
 });
 

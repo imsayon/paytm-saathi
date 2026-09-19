@@ -42,27 +42,20 @@ function datasetFor(merchantId: string): string {
 async function mirrorToCognee(merchantId: string, fact: string): Promise<void> {
   if (!cogneeConfigured()) return;
   try {
-    // Cognee 1.0's memory-native API accepts JSON. Keep a small compatibility
-    // fallback for self-hosted deployments that still expose the older
-    // multipart `remember` contract.
-    const response = await fetch(`${config.cogneeBaseUrl}/api/v1/remember`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": config.cogneeApiKey! },
-      body: JSON.stringify({ data: fact, dataset_name: datasetFor(merchantId) }),
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (response.ok) return;
-
+    // Cognee Cloud's current `remember` endpoint accepts text as multipart
+    // `raw_data` and scopes it with the existing dataset name. Do not send
+    // customer identifiers, contacts or payment rows to the memory mirror;
+    // `fact` is deliberately limited to decision-level memory.
     const form = new FormData();
     form.set("datasetName", datasetFor(merchantId));
     form.set("raw_data", fact);
-    const legacy = await fetch(`${config.cogneeBaseUrl}/api/v1/remember`, {
+    const response = await fetch(`${config.cogneeBaseUrl}/api/v1/remember`, {
       method: "POST",
       headers: { "x-api-key": config.cogneeApiKey! },
       body: form,
       signal: AbortSignal.timeout(8_000),
     });
-    if (!legacy.ok) throw new Error(`HTTP ${legacy.status}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
   } catch (error) {
     log("warn", "memory.cognee_mirror_failed", { reason: error instanceof Error ? error.message.slice(0, 80) : "unknown" });
   }

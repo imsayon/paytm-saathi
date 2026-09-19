@@ -13,7 +13,7 @@ test("the full demo path runs from import to holdout report", async ({ page }) =
   await page.goto("/");
 
   // 1. Import the frozen fixture.
-  await page.getByRole("button", { name: "Load demo CSV" }).click();
+  await page.getByRole("button", { name: "Load sample data" }).click();
   await expect(page.getByText("Regulars now absent 21+ days")).toBeVisible();
 
   // 2. The documented signal.
@@ -54,15 +54,15 @@ test("the full demo path runs from import to holdout report", async ({ page }) =
   await expect(page.locator(".card", { hasText: "Jobs queued at approval" }).locator(".stat")).toHaveText("10");
   await expect(page.locator(".card", { hasText: "Holdout (never contacted)" }).locator(".stat")).toHaveText("10");
 
-  // 8. Run the mock delivery, including the timeout that recovers via a status check.
-  await page.getByRole("button", { name: "Run mock delivery" }).click();
+  // 8. Run delivery, including the timeout that recovers via a status check.
+  await page.getByRole("button", { name: "Run delivery" }).click();
   await expect(page.locator(".card", { hasText: "Delivered" }).locator(".stat")).toHaveText("9", { timeout: 30_000 });
   await expect(page.locator(".card", { hasText: "Failed or needs review" }).locator(".stat")).toHaveText("1");
   await expect(page.getByText("status_check_not_delivered")).toBeVisible();
 
-  // 9. Advance the demo clock seven days.
+  // 9. Advance the outcome window seven days.
   await page.getByRole("link", { name: "Go to outcome report" }).click();
-  await page.getByRole("button", { name: "Advance demo clock seven days" }).click();
+  await page.getByRole("button", { name: "Advance outcome window seven days" }).click();
 
   // 10. Campaign versus holdout, with the caveats visible.
   await expect(page.locator(".card", { hasText: "Campaign return rate" }).locator(".stat")).toHaveText("60%", {
@@ -70,7 +70,7 @@ test("the full demo path runs from import to holdout report", async ({ page }) =
   });
   await expect(page.locator(".card", { hasText: "Holdout return rate" }).locator(".stat")).toHaveText("20%");
   await expect(page.locator(".card", { hasText: "Descriptive difference" }).locator(".stat")).toHaveText("40 pp");
-  await expect(page.getByText(/not proven causal impact/)).toBeVisible();
+  await expect(page.getByText(/not proof of causal impact/)).toBeVisible();
 
   // 11. The audit trail covers the whole path.
   const audit = page.locator(".timeline");
@@ -129,7 +129,7 @@ test("the outcome simulation stays idempotent when re-run", async ({ page }) => 
   const campaignUrl = page.url().replace("/review", "/outcome");
   await page.goto(campaignUrl);
 
-  await page.getByRole("button", { name: "Re-run seven-day simulation" }).click();
+  await page.getByRole("button", { name: "Re-run outcome window" }).click();
   await expect(page.locator(".card", { hasText: "Campaign return rate" }).locator(".stat")).toHaveText("60%");
   await expect(page.locator(".card", { hasText: "Holdout return rate" }).locator(".stat")).toHaveText("20%");
 });

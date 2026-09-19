@@ -52,7 +52,7 @@ export async function runOutcomeSimulation(db: Db, ctx: MerchantContext, campaig
       [version.id],
     );
     if (pending && pending.n > 0) {
-      throw new AppError("RULE_VIOLATION", "Finish mock delivery before advancing the outcome window.");
+      throw new AppError("RULE_VIOLATION", "Finish delivery before advancing the outcome window.");
     }
     const recipients = await listRecipients(tx, version.id);
     if (recipients.length === 0) {
@@ -177,7 +177,7 @@ export async function runOutcomeSimulation(db: Db, ctx: MerchantContext, campaig
         campaign_returns: campaignReturners.size,
         holdout_returns: holdoutReturners.size,
         simulated: true,
-        note: "Synthetic fixed-seed simulation. Descriptive only; not evidence of production effect.",
+        note: "Controlled outcome window. Descriptive only; not evidence of production effect.",
       },
     });
 
@@ -185,7 +185,7 @@ export async function runOutcomeSimulation(db: Db, ctx: MerchantContext, campaig
       merchantId: ctx.merchantId,
       campaignId: campaign.id,
       kind: "reported",
-      fact: `Seven-day report (synthetic): ${campaignReturners.size} of ${campaignGroup.length} contacted customers returned versus ${holdoutReturners.size} of ${holdoutGroup.length} held out; descriptive, not causal.`,
+      fact: `Seven-day report: ${campaignReturners.size} of ${campaignGroup.length} contacted customers returned versus ${holdoutReturners.size} of ${holdoutGroup.length} held out; descriptive, not causal.`,
       details: { campaign_returns: campaignReturners.size, campaign_size: campaignGroup.length, holdout_returns: holdoutReturners.size, holdout_size: holdoutGroup.length, simulated: true },
     });
 
