@@ -17,10 +17,10 @@ services:
     # end of the build instead (idempotent and advisory-locked, see
     # src/server/db/migrate.ts).
     plan: free
-    # pnpm is pinned to the version in package.json's `packageManager` field.
-    # `--prod=false` keeps devDependencies (typescript, tsx) installed even if
-    # NODE_ENV is set, because `next build` and the migration script need them.
-    buildCommand: npm install -g pnpm@12.4.2 && pnpm install --frozen-lockfile --prod=false && pnpm build && pnpm db:migrate
+    # Render detects the pnpm version from package.json's `packageManager`
+    # field. Avoid global npm installs because Render's image keeps that path
+    # read-only. `--prod=false` keeps TypeScript/tsx for build and migrations.
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm build && pnpm db:migrate
     # The `pnpm start` script binds to 127.0.0.1 on purpose for local demos;
     # Render's port scan needs 0.0.0.0. `next start` reads $PORT on its own.
     startCommand: npx next start --hostname 0.0.0.0
