@@ -216,8 +216,8 @@ export default function SignalsPage() {
               </tr>
             </thead>
             <tbody>
-              {eligible.map((customer) => (
-                <tr key={customer.customer_ref}>
+              {eligible.map((customer, index) => (
+                <tr key={`${customer.customer_ref}-${index}`}>
                   <td>
                     <code>{customer.customer_ref}</code>
                   </td>
@@ -245,8 +245,8 @@ export default function SignalsPage() {
             </tr>
           </thead>
           <tbody>
-            {excluded.map((customer) => (
-              <tr key={customer.customer_ref}>
+            {excluded.map((customer, index) => (
+              <tr key={`${customer.customer_ref}-${index}`}>
                 <td>
                   <code>{customer.customer_ref}</code>
                 </td>
